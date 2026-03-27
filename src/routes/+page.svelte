@@ -197,8 +197,13 @@
       try {
         await invoke("update_last_used", { id: profile.id });
 
-        // Determine working directory — use worktree if already set, or create one if needed
-        let spawnPath = profile.worktreePath || profile.projectPath;
+        // Determine working directory:
+        // - Resuming a session: always use original project path (Claude stores sessions by project root)
+        // - New session with worktree: use worktree path for file isolation
+        // - New session without worktree: use original project path
+        let spawnPath = profile.claudeSessionId
+          ? profile.projectPath  // resuming — Claude needs the original project path
+          : (profile.worktreePath || profile.projectPath);
 
         if (!profile.worktreePath) {
           // Check if another session for this project already has a terminal running
