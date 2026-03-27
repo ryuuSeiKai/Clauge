@@ -1,0 +1,739 @@
+<script>
+  import { onMount } from "svelte";
+  import { invoke, Channel } from "@tauri-apps/api/core";
+  import { Terminal } from "@xterm/xterm";
+  import { FitAddon } from "@xterm/addon-fit";
+  import "@xterm/xterm/css/xterm.css";
+
+  let profiles = $state([]);
+  let activeProfile = $state(null);
+  let showModal = $state(false);
+  let showSettings = $state(false);
+  let settingsTab = $state('settings');
+  let currentTerminalId = null;
+  let terminalEl;
+  let statusMsg = $state("Ready");
+  let tokenUsage = $state(null);
+  let tokenInterval = null;
+  let usageLimits = $state(null);
+  let sessionKeyInput = $state('');
+  let sessionKeyConfigured = $state(false);
+  let showKeyEdit = $state(false);
+  let usageRefreshInterval = null;
+
+  // Expand/collapse state — persisted to localStorage
+  let expandedGroups = $state(
+    typeof localStorage !== 'undefined'
+      ? JSON.parse(localStorage.getItem('clauge-expanded') || '{}')
+      : {}
+  );
+
+  function toggleGroup(name) {
+    expandedGroups[name] = !expandedGroups[name];
+    expandedGroups = { ...expandedGroups }; // trigger reactivity
+    localStorage.setItem('clauge-expanded', JSON.stringify(expandedGroups));
+  }
+
+  function isGroupExpanded(name) {
+    // Default to expanded if not set
+    return expandedGroups[name] !== false;
+  }
+
+  // Delete confirmation
+  let deleteConfirm = $state(null); // profile to confirm delete
+
+  // Theme state
+  let currentTheme = $state(typeof localStorage !== 'undefined' ? (localStorage.getItem('clauge-theme') || 'dark') : 'dark');
+  let accentColor = $state(typeof localStorage !== 'undefined' ? (localStorage.getItem('clauge-accent') || '#58a6ff') : '#58a6ff');
+
+  // Terminal management — one xterm per profile, switch between them
+  const terminalMap = new Map();
+  let activeTermEntry = null;
+
+  // Modal state
+  let modalPath = $state("");
+  let modalTitle = $state("");
+  let modalPurpose = $state("");
+
+  const purposes = [
+    { label: "Brainstorming", color: "#d2a8ff" },
+    { label: "Development", color: "#3fb950" },
+    { label: "Code Review", color: "#58a6ff" },
+    { label: "Debugging", color: "#f85149" },
+  ];
+  const purposeColors = Object.fromEntries(purposes.map(p => [p.label, p.color]));
+
+  // Theme definitions
+  const themes = {
+    dark: {
+      bg: "transparent", sidebarBg: "rgba(22, 27, 34, 0.75)", termBg: "rgba(13, 17, 23, 0.85)",
+      border: "#30363d", textPrimary: "#e6edf3", textSecondary: "#8b949e",
+      termTheme: {
+        background: "#0d1117", foreground: "#e6edf3", cursor: "#58a6ff", cursorAccent: "#0d1117",
+        selectionBackground: "rgba(88, 166, 255, 0.3)",
+        black: "#484f58", red: "#ff7b72", green: "#3fb950", yellow: "#d29922",
+        blue: "#58a6ff", magenta: "#bc8cff", cyan: "#39d353", white: "#b1bac4",
+        brightBlack: "#6e7681", brightRed: "#ffa198", brightGreen: "#56d364",
+        brightYellow: "#e3b341", brightBlue: "#79c0ff", brightMagenta: "#d2a8ff",
+        brightCyan: "#56d364", brightWhite: "#f0f6fc",
+      }
+    },
+    light: {
+      bg: "transparent", sidebarBg: "rgba(246, 248, 250, 0.8)", termBg: "rgba(255, 255, 255, 0.9)",
+      border: "#d0d7de", textPrimary: "#1f2328", textSecondary: "#656d76",
+      termTheme: {
+        background: "#ffffff", foreground: "#1f2328", cursor: "#0969da", cursorAccent: "#ffffff",
+        selectionBackground: "rgba(9, 105, 218, 0.2)",
+        black: "#24292f", red: "#cf222e", green: "#116329", yellow: "#4d2d00",
+        blue: "#0969da", magenta: "#8250df", cyan: "#1b7c83", white: "#6e7781",
+        brightBlack: "#57606a", brightRed: "#a40e26", brightGreen: "#1a7f37",
+        brightYellow: "#633c01", brightBlue: "#218bff", brightMagenta: "#a475f9",
+        brightCyan: "#3192aa", brightWhite: "#8c959f",
+      }
+    }
+  };
+
+  function applyTheme(themeName) {
+    currentTheme = themeName;
+    localStorage.setItem('clauge-theme', themeName);
+    const t = themes[themeName];
+    const root = document.documentElement;
+    root.style.setProperty('--sidebar-bg', t.sidebarBg);
+    root.style.setProperty('--term-bg', t.termBg);
+    root.style.setProperty('--border', t.border);
+    root.style.setProperty('--text-primary', t.textPrimary);
+    root.style.setProperty('--text-secondary', t.textSecondary);
+    root.style.setProperty('--accent', accentColor);
+    root.style.setProperty('--modal-bg', themeName === 'light' ? 'rgba(255, 255, 255, 0.95)' : '#161b22');
+    root.style.setProperty('--input-bg', themeName === 'light' ? '#f6f8fa' : '#0d1117');
+    root.style.setProperty('--hover-bg', themeName === 'light' ? 'rgba(0,0,0,0.04)' : 'rgba(255,255,255,0.06)');
+    root.style.setProperty('--btn-bg', themeName === 'light' ? '#f0f2f4' : '#21262d');
+    // Update all existing terminals
+    for (const [, entry] of terminalMap) {
+      if (entry.term) entry.term.options.theme = { ...t.termTheme, cursor: accentColor };
+    }
+  }
+
+  function applyAccent(color) {
+    accentColor = color;
+    localStorage.setItem('clauge-accent', color);
+    document.documentElement.style.setProperty('--accent', color);
+    for (const [, entry] of terminalMap) {
+      if (entry.term) entry.term.options.theme = { ...themes[currentTheme].termTheme, cursor: color };
+    }
+  }
+
+  async function loadProfiles() {
+    try {
+      profiles = await invoke("refresh_session_ids");
+    } catch (e) {
+      try { profiles = await invoke("get_profiles"); } catch (e2) { statusMsg = "Load failed: " + e2; }
+    }
+  }
+
+  function createTermEntry(profileId) {
+    const t = new Terminal({
+      theme: { ...themes[currentTheme].termTheme, cursor: accentColor },
+      fontFamily: '"SF Mono", "Fira Code", "Cascadia Code", monospace',
+      fontSize: 13, lineHeight: 1.4, cursorBlink: true, cursorStyle: "bar", scrollback: 10000,
+    });
+    const fa = new FitAddon();
+    t.loadAddon(fa);
+
+    const container = document.createElement("div");
+    container.style.cssText = "width:100%;height:100%;display:none;";
+    terminalEl.appendChild(container);
+    t.open(container);
+
+    t.onData((data) => {
+      const entry = terminalMap.get(profileId);
+      if (entry?.terminalId) invoke("write_to_terminal", { terminalId: entry.terminalId, data });
+    });
+
+    new ResizeObserver(() => {
+      if (fa && container.offsetWidth > 0) requestAnimationFrame(() => { try { fa.fit(); } catch(_) {} });
+    }).observe(container);
+
+    const entry = { term: t, fitAddon: fa, container, terminalId: null, channel: null };
+    terminalMap.set(profileId, entry);
+    return entry;
+  }
+
+  function showTermEntry(entry) {
+    if (activeTermEntry && activeTermEntry !== entry) activeTermEntry.container.style.display = "none";
+    entry.container.style.display = "block";
+    activeTermEntry = entry;
+    currentTerminalId = entry.terminalId;
+    requestAnimationFrame(() => { try { entry.fitAddon.fit(); } catch(_) {} });
+  }
+
+  async function selectProfile(profile) {
+    activeProfile = profile;
+    let entry = terminalMap.get(profile.id);
+
+    if (entry && entry.terminalId) {
+      showTermEntry(entry);
+      statusMsg = profile.title;
+    } else {
+      statusMsg = "Spawning...";
+      if (!entry) entry = createTermEntry(profile.id);
+
+      try {
+        await invoke("update_last_used", { id: profile.id });
+        const onOutput = new Channel();
+        onOutput.onmessage = (payload) => {
+          if (entry.term) {
+            try {
+              const binary = atob(payload.data);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+              entry.term.write(bytes);
+            } catch(e) {}
+          }
+        };
+        entry.channel = onOutput;
+
+        const tid = await invoke("spawn_terminal", {
+          sessionId: profile.claudeSessionId || null,
+          projectPath: profile.projectPath,
+          contextPrompt: profile.contextPrompt,
+          onOutput: onOutput,
+        });
+        entry.terminalId = tid;
+        currentTerminalId = tid;
+        statusMsg = profile.title;
+        showTermEntry(entry);
+
+        if (!profile.claudeSessionId) {
+          setTimeout(async () => {
+            try {
+              const sessions = await invoke("discover_sessions", { projectPath: profile.projectPath });
+              if (sessions.length > 0) {
+                await invoke("update_session_id", { id: profile.id, claudeSessionId: sessions[0].sessionId });
+                profile.claudeSessionId = sessions[0].sessionId;
+                await loadProfiles();
+              }
+            } catch(e) {}
+          }, 3000);
+        }
+
+        entry.fitAddon.fit();
+        const dims = entry.fitAddon.proposeDimensions();
+        if (dims) await invoke("resize_terminal", { terminalId: tid, cols: dims.cols, rows: dims.rows });
+      } catch (e) {
+        statusMsg = "ERROR: " + String(e);
+        entry.term.writeln("\r\n\x1b[31mError: " + String(e) + "\x1b[0m");
+        showTermEntry(entry);
+      }
+    }
+
+    async function refreshTokens() {
+      try {
+        tokenUsage = await invoke("get_session_tokens", { projectPath: profile.projectPath, sessionId: profile.claudeSessionId || null });
+      } catch(e) { tokenUsage = null; }
+    }
+    await refreshTokens();
+    if (tokenInterval) clearInterval(tokenInterval);
+    tokenInterval = setInterval(refreshTokens, 10000);
+  }
+
+  async function createSession() {
+    if (!modalPath || !modalTitle || !modalPurpose) return;
+    try {
+      const profile = await invoke("create_profile", { title: modalTitle, purpose: modalPurpose, projectPath: modalPath });
+      showModal = false;
+      modalPath = ""; modalTitle = ""; modalPurpose = "";
+      await loadProfiles();
+      await selectProfile(profile);
+    } catch (e) { statusMsg = "Create failed: " + e; }
+  }
+
+  function deleteProfile(e, profile) {
+    e.preventDefault();
+    e.stopPropagation();
+    deleteConfirm = profile;
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+    await invoke("delete_profile", { id: deleteConfirm.id });
+    if (activeProfile?.id === deleteConfirm.id) { activeProfile = null; currentTerminalId = null; }
+    deleteConfirm = null;
+    await loadProfiles();
+  }
+
+  function relativeTime(iso) {
+    if (!iso) return "";
+    const sec = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (sec < 60) return "just now";
+    if (sec < 3600) return Math.floor(sec/60) + "m ago";
+    if (sec < 86400) return Math.floor(sec/3600) + "h ago";
+    return Math.floor(sec/86400) + "d ago";
+  }
+
+  function groupByProject(list) {
+    const g = {};
+    for (const p of list) {
+      const name = p.projectName || "Unknown";
+      if (!g[name]) g[name] = [];
+      g[name].push(p);
+    }
+    return g;
+  }
+
+  let grouped = $derived(groupByProject(profiles));
+
+  async function browsePath() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({ directory: true, multiple: false, title: "Select Project Folder" });
+      if (selected) {
+        modalPath = selected;
+        if (!modalTitle) modalTitle = selected.split("/").filter(Boolean).pop() || "";
+      }
+    } catch(e) { statusMsg = "Browse failed: " + e; }
+  }
+
+  function handleGlobalKeydown(e) {
+    if (e.metaKey && e.key === 'n') { e.preventDefault(); showModal = true; }
+    if (e.metaKey && e.key >= '1' && e.key <= '9') {
+      e.preventDefault();
+      const idx = parseInt(e.key) - 1;
+      if (profiles[idx]) selectProfile(profiles[idx]);
+    }
+    if (e.key === 'Escape') { showModal = false; showSettings = false; }
+  }
+
+  function openExternal(url) {
+    import("@tauri-apps/plugin-opener").then(m => m.openUrl(url)).catch(() => window.open(url, "_blank"));
+  }
+
+
+  async function loadUsageLimits() {
+    try {
+      // Load saved session key
+      const key = await invoke("load_session_key");
+      if (!key) return;
+
+      // Fetch via Rust (uses macOS native NSURLSession which bypasses Cloudflare)
+      const usage = await invoke("fetch_usage_limits", { sessionKey: key });
+
+      usageLimits = {
+        sessionPercent: usage.five_hour?.utilization || 0,
+        sessionResets: usage.five_hour?.resets_at || "",
+        weeklyAllPercent: usage.seven_day?.utilization || 0,
+        weeklyAllResets: usage.seven_day?.resets_at || "",
+        weeklySonnetPercent: usage.seven_day_sonnet?.utilization ?? null,
+        weeklySonnetResets: usage.seven_day_sonnet?.resets_at ?? null,
+      };
+
+      // Update menu bar tray text
+      const s = Math.round(usageLimits.sessionPercent);
+      const w = Math.round(usageLimits.weeklyAllPercent);
+      await invoke("update_tray_title", { title: `S:${s}% W:${w}%` }).catch(() => {});
+    } catch(e) {
+      console.error("Usage limits failed:", e);
+      usageLimits = null;
+      await invoke("update_tray_title", { title: "" }).catch(() => {});
+    }
+  }
+
+
+  onMount(() => {
+    const t0 = performance.now();
+    console.log(`[TIMING] onMount start`);
+
+    applyTheme(currentTheme);
+
+    // Priority 1: Load profiles (fast, <10ms)
+    loadProfiles();
+
+    // Priority 2: Load session key + usage limits (fast key read, then ~1.5s API call)
+    invoke("load_session_key").then(savedKey => {
+      if (savedKey) {
+        sessionKeyInput = savedKey;
+        sessionKeyConfigured = true;
+        loadUsageLimits();
+        usageRefreshInterval = setInterval(loadUsageLimits, 5 * 60 * 1000);
+      }
+    }).catch(() => {});
+
+  });
+</script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
+
+<div class="app-wrapper">
+<div class="app">
+  <div class="drag-bar"></div>
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <span class="app-title">Clauge</span>
+      <div class="header-actions">
+        <button class="settings-btn" onclick={() => showSettings = true} title="Settings">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path fill-rule="evenodd" d="M7.429 1.525a6.593 6.593 0 011.142 0c.036.003.108.036.137.146l.289 1.105c.147.56.55.967.997 1.189.174.086.341.183.501.29.417.278.97.423 1.53.27l1.102-.303c.11-.03.175.016.195.046.219.31.41.641.573.989.014.031.022.11-.059.19l-.815.806c-.411.406-.562.957-.53 1.456a4.588 4.588 0 010 .582c-.032.499.119 1.05.53 1.456l.815.806c.08.08.073.159.059.19a6.494 6.494 0 01-.573.99c-.02.029-.086.074-.195.045l-1.103-.303c-.559-.153-1.112-.008-1.529.27-.16.107-.327.204-.5.29-.449.222-.851.628-.998 1.189l-.289 1.105c-.029.11-.101.143-.137.146a6.613 6.613 0 01-1.142 0c-.036-.003-.108-.037-.137-.146l-.289-1.105c-.147-.56-.55-.967-.997-1.189a4.502 4.502 0 01-.501-.29c-.417-.278-.97-.423-1.53-.27l-1.102.303c-.11.03-.175-.016-.195-.046a6.492 6.492 0 01-.573-.989c-.014-.031-.022-.11.059-.19l.815-.806c.411-.406.562-.957.53-1.456a4.587 4.587 0 010-.582c.032-.499-.119-1.05-.53-1.456l-.815-.806c-.08-.08-.073-.159-.059-.19a6.44 6.44 0 01.573-.99c.02-.029.086-.074.195-.045l1.103.303c.559.153 1.112.008 1.529-.27.16-.107.327-.204.5-.29.449-.222.851-.628.998-1.189l.289-1.105c.029-.11.101-.143.137-.146zM8 0c-.236 0-.47.01-.701.03-.743.065-1.29.615-1.458 1.261l-.29 1.106c-.017.066-.078.158-.211.224a5.994 5.994 0 00-.668.386c-.123.082-.233.117-.3.117h-.013l-1.104-.303c-.659-.18-1.364.019-1.783.667a7.998 7.998 0 00-.747 1.305c-.31.649-.107 1.39.303 1.895l.815.806c.05.048.098.147.088.294a6.084 6.084 0 000 .772c.01.147-.038.246-.088.294l-.815.806c-.41.505-.613 1.246-.303 1.895.216.452.46.882.747 1.305.42.648 1.124.848 1.783.667l1.104-.303c.06-.017.145-.003.3.117.196.131.42.271.668.386.133.066.194.158.212.224l.289 1.106c.169.646.715 1.196 1.458 1.26a8.094 8.094 0 001.402 0c.743-.064 1.29-.614 1.458-1.26l.29-1.106c.017-.066.078-.158.211-.224a5.98 5.98 0 00.668-.386c.123-.082.233-.117.3-.117h.013l1.104.303c.659.18 1.364-.019 1.783-.667.287-.423.531-.853.747-1.305.31-.649.107-1.39-.303-1.895l-.815-.806c-.05-.048-.098-.147-.088-.294a6.1 6.1 0 000-.772c-.01-.147.039-.246.088-.294l.815-.806c.41-.505.613-1.246.303-1.895a7.998 7.998 0 00-.747-1.305c-.42-.648-1.124-.848-1.783-.667l-1.104.303c-.06.017-.145.003-.3-.117a5.994 5.994 0 00-.668-.386c-.133-.066-.194-.158-.212-.224L10.16 1.29C9.99.645 9.444.095 8.701.031A8.094 8.094 0 008 0zm0 5.5a2.5 2.5 0 100 5 2.5 2.5 0 000-5zM6.5 8a1.5 1.5 0 113 0 1.5 1.5 0 01-3 0z"/>
+          </svg>
+        </button>
+        <button class="new-btn" onclick={() => showModal = true} title="New Session (Cmd+N)">+</button>
+      </div>
+    </div>
+    <div class="sidebar-content">
+      {#if profiles.length === 0}
+        <div class="empty-sidebar">No sessions yet. Click + to create one.</div>
+      {:else}
+        {#each Object.entries(grouped) as [projectName, items]}
+          <div class="project-group">
+            <button class="project-header" onclick={() => toggleGroup(projectName)}>
+              <svg class="chevron" class:collapsed={!isGroupExpanded(projectName)} width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                <path d="M3 2l4 3-4 3z"/>
+              </svg>
+              {projectName}
+              <span class="project-count">{items.length}</span>
+            </button>
+            {#if isGroupExpanded(projectName)}
+              {#each items as profile}
+                {#if deleteConfirm?.id === profile.id}
+                  <div class="delete-confirm">
+                    <span>Delete "{profile.title}"?</span>
+                    <div class="delete-actions">
+                      <button class="del-yes" onclick={confirmDelete}>Delete</button>
+                      <button class="del-no" onclick={() => deleteConfirm = null}>Cancel</button>
+                    </div>
+                  </div>
+                {:else}
+                  <button
+                    class="profile-item"
+                    class:active={activeProfile?.id === profile.id}
+                    onclick={() => selectProfile(profile)}
+                    oncontextmenu={(e) => deleteProfile(e, profile)}
+                  >
+                    <div class="profile-title">
+                      <span class="status-dot" class:active={activeProfile?.id === profile.id}></span>
+                      {profile.title}
+                    </div>
+                    <div class="profile-meta">
+                      <span class="badge" style="color:{purposeColors[profile.purpose] || '#8b949e'}; background:{purposeColors[profile.purpose] || '#8b949e'}22">{profile.purpose}</span>
+                      <span class="time">{relativeTime(profile.lastUsedAt)}</span>
+                    </div>
+                  </button>
+                {/if}
+              {/each}
+            {/if}
+          </div>
+        {/each}
+      {/if}
+    </div>
+  </aside>
+
+  <div class="terminal-area">
+    {#if !activeProfile}
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border)" stroke-width="1.5">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+        <p class="empty-title">No active session</p>
+        <p class="empty-sub">Select a session from the sidebar or create a new one</p>
+      </div>
+    {/if}
+    {#if activeProfile}
+      <div class="purpose-glow" style="background: linear-gradient(180deg, {purposeColors[activeProfile.purpose] || accentColor}15 0%, transparent 100%);"></div>
+    {/if}
+    <div class="terminal-panel" bind:this={terminalEl}></div>
+  </div>
+</div>
+<div class="bottom-bar">
+  {#if usageLimits}
+    <div class="limit-meter">
+      <span class="limit-label">Session</span>
+      <div class="limit-track">
+        <div class="limit-fill" style="width:{usageLimits.sessionPercent}%;background:{usageLimits.sessionPercent > 80 ? '#f85149' : usageLimits.sessionPercent > 50 ? '#d29922' : 'var(--accent)'}"></div>
+      </div>
+      <span class="limit-pct">{usageLimits.sessionPercent.toFixed(0)}%</span>
+    </div>
+    <div class="limit-sep"></div>
+    <div class="limit-meter">
+      <span class="limit-label">Weekly</span>
+      <div class="limit-track">
+        <div class="limit-fill" style="width:{usageLimits.weeklyAllPercent}%;background:{usageLimits.weeklyAllPercent > 80 ? '#f85149' : usageLimits.weeklyAllPercent > 50 ? '#d29922' : 'var(--accent)'}"></div>
+      </div>
+      <span class="limit-pct">{usageLimits.weeklyAllPercent.toFixed(0)}%</span>
+    </div>
+    {#if usageLimits.weeklySonnetPercent != null}
+      <div class="limit-sep"></div>
+      <div class="limit-meter">
+        <span class="limit-label">Sonnet</span>
+        <div class="limit-track">
+          <div class="limit-fill" style="width:{usageLimits.weeklySonnetPercent}%;background:{usageLimits.weeklySonnetPercent > 80 ? '#f85149' : usageLimits.weeklySonnetPercent > 50 ? '#d29922' : 'var(--accent)'}"></div>
+        </div>
+        <span class="limit-pct">{usageLimits.weeklySonnetPercent.toFixed(0)}%</span>
+      </div>
+    {/if}
+  {:else}
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <span class="limit-loading" onclick={() => { showSettings = true; settingsTab = 'usage'; }} style="cursor:pointer;">
+      Set up usage tracking in Settings
+    </span>
+  {/if}
+</div>
+</div>
+
+{#if showModal}
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+<div class="modal-backdrop" onclick={(e) => { if (e.target === e.currentTarget) showModal = false; }}>
+  <div class="modal">
+    <h2>New Session</h2>
+    <label>Project Folder
+      <div class="row">
+        <input bind:value={modalPath} placeholder="/path/to/project" />
+        <button onclick={browsePath}>Browse</button>
+      </div>
+    </label>
+    <label>Title
+      <input bind:value={modalTitle} placeholder="e.g. Auth Refactor" />
+    </label>
+    <label>Purpose
+      <div class="chips">
+        {#each purposes as p}
+          <button class="chip" class:selected={modalPurpose === p.label}
+            style={modalPurpose === p.label ? `background:${p.color}33;color:${p.color};border-color:${p.color}` : ""}
+            onclick={() => modalPurpose = p.label}>{p.label}</button>
+        {/each}
+      </div>
+    </label>
+    <div class="modal-actions">
+      <button onclick={() => showModal = false}>Cancel</button>
+      <button class="create-btn" disabled={!modalPath || !modalTitle || !modalPurpose} onclick={createSession}>Create</button>
+    </div>
+  </div>
+</div>
+{/if}
+
+{#if showSettings}
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+<div class="modal-backdrop">
+  <div class="modal settings-modal">
+    <div class="settings-tabs">
+      <button class="stab" class:active={settingsTab === 'settings'} onclick={() => settingsTab = 'settings'}>Settings</button>
+      <button class="stab" class:active={settingsTab === 'usage'} onclick={() => settingsTab = 'usage'}>Usage</button>
+    </div>
+
+    {#if settingsTab === 'settings'}
+      <label>Theme
+        <div class="chips" style="margin-top:6px;">
+          <button class="chip" class:selected={currentTheme === 'dark'} onclick={() => applyTheme('dark')}>Dark</button>
+          <button class="chip" class:selected={currentTheme === 'light'} onclick={() => applyTheme('light')}>Light</button>
+        </div>
+      </label>
+
+      <label>Accent Color
+        <div class="accent-row">
+          {#each ['#58a6ff', '#d2a8ff', '#3fb950', '#f85149', '#d29922', '#ff7b72'] as color}
+            <button class="color-dot" style="background:{color};{accentColor === color ? 'box-shadow:0 0 0 2px var(--text-primary);' : ''}"
+              onclick={() => applyAccent(color)} title={color}></button>
+          {/each}
+        </div>
+      </label>
+
+      <div class="settings-links">
+        <button class="slink" onclick={() => openExternal('https://github.com/AnsXuman/Clauge/issues')}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 9.5a1.5 1.5 0 100-3 1.5 1.5 0 000 3z"/><path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
+          Report Issue
+        </button>
+        <button class="slink" onclick={() => openExternal('https://github.com/AnsXuman/Clauge')}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4.72 3.22a.75.75 0 011.06 1.06L2.06 8l3.72 3.72a.75.75 0 11-1.06 1.06L.47 8.53a.75.75 0 010-1.06l4.25-4.25zm6.56 0a.75.75 0 10-1.06 1.06L13.94 8l-3.72 3.72a.75.75 0 101.06 1.06l4.25-4.25a.75.75 0 000-1.06L11.28 3.22z"/></svg>
+          Source Code
+        </button>
+        <button class="slink" onclick={() => openExternal('https://github.com/AnsXuman')}>
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.561 8.073a6.005 6.005 0 013.432 5.142.75.75 0 11-1.498.07 4.5 4.5 0 00-8.99 0 .75.75 0 01-1.498-.07 6.004 6.004 0 013.431-5.142 3.999 3.999 0 115.123 0zM10.5 5a2.5 2.5 0 10-5 0 2.5 2.5 0 005 0z"/></svg>
+          Developer
+        </button>
+        <button class="slink coffee" onclick={() => openExternal('https://buymeacoffee.com/ansxuman')}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21.5c0 .28.22.5.5.5h15c.28 0 .5-.22.5-.5V18H2v3.5zM20 6h-1V4.5c0-.28-.22-.5-.5-.5h-15c-.28 0-.5.22-.5.5V6H2c-1.1 0-2 .9-2 2v2c0 1.1.9 2 2 2h1.47c.41 1.74 1.7 3.15 3.37 3.72l-.34.78c-.12.28.04.5.34.5h6.32c.3 0 .46-.22.34-.5l-.34-.78c1.67-.57 2.96-1.98 3.37-3.72H18c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 4h-1V8h1v2z"/></svg>
+          Buy me a coffee
+        </button>
+      </div>
+    {:else}
+      {#if sessionKeyConfigured}
+        <div class="key-status">
+          <div class="key-status-row">
+            <span class="key-dot connected"></span>
+            <span style="font-size:12px;color:var(--text-primary);">Session key configured</span>
+            <span style="font-size:10px;color:var(--text-secondary);margin-left:auto;">Refreshes every 5 min</span>
+          </div>
+          {#if !showKeyEdit}
+            <div style="display:flex;gap:8px;margin-top:8px;">
+              <button class="save-key-btn" onclick={() => loadUsageLimits()}>Refresh Now</button>
+              <button class="save-key-btn" style="color:var(--text-secondary);border-color:var(--border);" onclick={() => showKeyEdit = true}>Edit Key</button>
+            </div>
+          {:else}
+            <div style="margin-top:8px;">
+              <input type="password" bind:value={sessionKeyInput} placeholder="sk-ant-sid01-..." style="font-size:12px;margin-bottom:4px;" />
+              <p style="font-size:10px;color:var(--text-secondary);margin:0 0 8px;">Open <strong>claude.ai</strong> → DevTools (F12) → Application → Cookies → copy <strong>sessionKey</strong> value</p>
+              <div style="display:flex;gap:8px;">
+                <button class="save-key-btn" onclick={async () => {
+                  if (sessionKeyInput.trim()) {
+                    await invoke("save_session_key", { key: sessionKeyInput.trim() });
+                    sessionKeyConfigured = true;
+                    showKeyEdit = false;
+                    await loadUsageLimits();
+                  }
+                }}>Save</button>
+                <button class="save-key-btn" style="color:var(--text-secondary);border-color:var(--border);" onclick={() => showKeyEdit = false}>Cancel</button>
+              </div>
+            </div>
+          {/if}
+        </div>
+      {:else}
+        <div class="session-key-setup">
+          <p style="font-size:12px;color:var(--text-primary);margin:0 0 8px;">Connect to claude.ai to see live usage limits</p>
+          <label style="margin-bottom:6px;">Session Key
+            <input type="password" bind:value={sessionKeyInput} placeholder="sk-ant-sid01-..." style="margin-top:4px;font-size:12px;" />
+          </label>
+          <p style="font-size:10px;color:var(--text-secondary);margin:0 0 10px;">Open <strong>claude.ai</strong> → DevTools (F12) → Application → Cookies → copy <strong>sessionKey</strong> value</p>
+          <button class="save-key-btn" onclick={async () => {
+            if (sessionKeyInput.trim()) {
+              await invoke("save_session_key", { key: sessionKeyInput.trim() });
+              sessionKeyConfigured = true;
+              await loadUsageLimits();
+              usageRefreshInterval = setInterval(loadUsageLimits, 5 * 60 * 1000);
+            }
+          }}>Connect</button>
+        </div>
+      {/if}
+
+    {/if}
+
+    <div class="modal-actions">
+      <button onclick={() => showSettings = false}>Close</button>
+    </div>
+  </div>
+</div>
+{/if}
+
+<style>
+  :global(:root) {
+    --sidebar-bg: rgba(22, 27, 34, 0.75);
+    --term-bg: rgba(13, 17, 23, 0.85);
+    --border: #30363d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --accent: #58a6ff;
+  }
+  :global(body) { margin: 0; padding: 0; overflow: hidden; background: transparent; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; color: var(--text-primary); }
+  .drag-bar { position: fixed; top: 0; left: 0; right: 0; height: 38px; -webkit-app-region: drag; z-index: 100; }
+  .app-wrapper { display: flex; flex-direction: column; height: 100vh; width: 100vw; overflow: hidden; }
+  .app { display: flex; flex: 1; min-height: 0; overflow: hidden; background: transparent; }
+
+  .sidebar { width: 220px; min-width: 220px; background: var(--sidebar-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; user-select: none; }
+  .sidebar-header { display: flex; align-items: center; justify-content: space-between; padding: 14px; padding-top: 38px; border-bottom: 1px solid var(--border); -webkit-app-region: drag; }
+  .app-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
+  .header-actions { display: flex; gap: 6px; align-items: center; -webkit-app-region: no-drag; }
+  .settings-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+  .settings-btn:hover { background: var(--border); color: var(--text-primary); }
+  .new-btn { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-primary); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; -webkit-app-region: no-drag; transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1); }
+  .new-btn:hover { background: var(--border); transform: scale(1.1); }
+  .new-btn:active { transform: scale(0.95); }
+
+  .sidebar-content { flex: 1; overflow-y: auto; padding: 8px 0; -webkit-app-region: no-drag; }
+  .empty-sidebar { padding: 24px 14px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+  .project-group { margin-bottom: 2px; }
+  .project-header { display: flex; align-items: center; gap: 4px; width: 100%; padding: 6px 14px; font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; border: none; background: transparent; cursor: pointer; font-family: inherit; transition: color 0.15s; }
+  .project-header:hover { color: var(--text-primary); }
+  .chevron { transition: transform 0.15s; flex-shrink: 0; }
+  .chevron.collapsed { transform: rotate(0deg); }
+  .chevron:not(.collapsed) { transform: rotate(90deg); }
+  .project-count { margin-left: auto; font-size: 10px; color: var(--text-secondary); opacity: 0.6; font-weight: 400; }
+  .delete-confirm { padding: 8px 14px; font-size: 12px; color: var(--text-primary); display: flex; flex-direction: column; gap: 6px; animation: fadeIn 0.15s ease-out; }
+  .delete-actions { display: flex; gap: 6px; }
+  .del-yes { padding: 3px 10px; border-radius: 4px; border: 1px solid #f85149; background: transparent; color: #f85149; font-size: 11px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+  .del-yes:hover { background: #f85149; color: #fff; }
+  .del-no { padding: 3px 10px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 11px; cursor: pointer; font-family: inherit; }
+  .del-no:hover { color: var(--text-primary); }
+  .profile-item { width: 100%; display: block; text-align: left; padding: 8px 14px; border: none; background: transparent; cursor: pointer; border-left: 3px solid transparent; font-family: inherit; -webkit-app-region: no-drag; position: relative; }
+  .profile-item:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); }
+  .profile-item.active { background: rgba(31,111,235,0.15); border-left-color: var(--accent); box-shadow: inset 0 0 20px rgba(88, 166, 255, 0.08); }
+  .profile-title { font-size: 13px; font-weight: 500; color: var(--text-primary); margin-bottom: 3px; }
+  .profile-meta { display: flex; align-items: center; justify-content: space-between; }
+  .badge { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; }
+  .time { font-size: 11px; color: var(--text-secondary); }
+  .bottom-bar { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 4px 16px; background: var(--sidebar-bg); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .limit-meter { display: flex; align-items: center; gap: 6px; }
+  .limit-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; width: 42px; }
+  .limit-track { width: 100px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
+  .limit-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+  .limit-pct { font-size: 11px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; width: 30px; text-align: right; }
+  .limit-sep { width: 1px; height: 12px; background: var(--border); }
+  .limit-loading { font-size: 10px; color: var(--text-secondary); }
+  .session-key-setup, .key-status { margin-bottom: 14px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+  .key-status-row { display: flex; align-items: center; gap: 8px; }
+  .key-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .key-dot.connected { background: #3fb950; box-shadow: 0 0 6px rgba(63, 185, 80, 0.5); }
+  .save-key-btn { padding: 5px 14px; border-radius: 6px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 11px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+  .save-key-btn:hover { background: var(--accent); color: #fff; }
+  .refresh-btn { padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--accent); font-size: 10px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+  .refresh-btn:hover:not(:disabled) { background: var(--hover-bg, rgba(255,255,255,0.06)); }
+  .refresh-btn:disabled { opacity: 0.5; cursor: wait; }
+
+  .settings-tabs { display: flex; gap: 0; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+  .stab { flex: 1; padding: 8px; border: none; background: transparent; color: var(--text-secondary); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .stab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .stab:hover { color: var(--text-primary); }
+
+  .settings-links { display: flex; flex-direction: column; gap: 2px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .slink { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; background: transparent; color: var(--text-secondary); font-size: 12px; font-family: inherit; cursor: pointer; border-radius: 5px; transition: all 0.15s; }
+  .slink:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); color: var(--text-primary); }
+  .slink.coffee { color: #d29922; }
+  .slink.coffee:hover { color: #e3b341; }
+
+  .usage-detail { margin-bottom: 12px; }
+  .usage-detail h3 { font-size: 11px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; margin: 0 0 6px; }
+  .ud-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 12px; color: var(--text-secondary); }
+  .ud-row span:last-child { color: var(--text-primary); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .ud-row.total { border-top: 1px solid var(--border); margin-top: 4px; padding-top: 4px; }
+  .ud-row.total span:last-child { color: var(--accent); font-weight: 700; }
+
+  .terminal-area { flex: 1; min-width: 0; height: 100vh; background: var(--term-bg); position: relative; overflow: hidden; -webkit-app-region: no-drag; }
+  .terminal-panel { width: 100%; height: 100%; padding: 4px; -webkit-app-region: no-drag; }
+  .terminal-panel :global(.xterm) { height: 100%; }
+  .terminal-panel :global(.xterm-viewport) { overflow-y: auto !important; }
+  .terminal-panel :global(.xterm-viewport::-webkit-scrollbar) { width: 8px; }
+  .terminal-panel :global(.xterm-viewport::-webkit-scrollbar-thumb) { background: var(--border); border-radius: 4px; }
+  .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 12px; position: absolute; inset: 0; }
+  .empty-title { font-size: 16px; font-weight: 500; color: var(--text-primary); }
+  .empty-sub { font-size: 13px; color: var(--text-secondary); }
+
+  .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display: flex; align-items: center; justify-content: center; z-index: 1000; animation: fadeIn 0.15s ease-out; }
+  .modal { background: #161b22; border: 1px solid var(--border); border-radius: 12px; padding: 20px; width: 420px; max-width: 90vw; animation: slideIn 0.2s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+  .modal h2 { font-size: 15px; color: var(--text-primary); margin: 0 0 16px; }
+  .modal label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 12px; }
+  .modal input { width: 100%; background: var(--input-bg, #0d1117); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; font-size: 13px; color: var(--text-primary); outline: none; box-sizing: border-box; margin-top: 4px; }
+  .modal input:focus { border-color: var(--accent); }
+  .row { display: flex; gap: 8px; margin-top: 4px; }
+  .row input { flex: 1; margin-top: 0; }
+  .row button { background: var(--btn-bg, #21262d); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .chip { padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+  .chip:hover { border-color: var(--text-secondary); }
+  .chip.selected { font-weight: 600; }
+  .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .modal-actions button { padding: 7px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; border: 1px solid var(--border); background: var(--btn-bg, #21262d); color: var(--text-primary); font-family: inherit; }
+  .create-btn { background: #238636 !important; border-color: transparent !important; color: #fff !important; }
+  .create-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .status-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #484f58; margin-right: 6px; vertical-align: middle; transition: background 0.3s; }
+  .status-dot.active { background: #3fb950; box-shadow: 0 0 6px rgba(63, 185, 80, 0.6); animation: pulse 2s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+  .purpose-glow { position: absolute; top: 0; left: 0; right: 0; height: 60px; z-index: 1; pointer-events: none; animation: glowFadeIn 0.5s ease-out; }
+  @keyframes glowFadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  /* Settings modal */
+  .modal { background: var(--modal-bg, #161b22); }
+  .accent-row { display: flex; gap: 10px; margin-top: 8px; }
+  .color-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.15s; }
+  .color-dot:hover { transform: scale(1.15); }
+
+</style>

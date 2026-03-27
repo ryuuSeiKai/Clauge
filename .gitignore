@@ -1,0 +1,7 @@
+node_modules/
+target/
+build/
+.svelte-kit/
+.superpowers/
+*.DS_Store
+src-tauri/scripts/fetch_usage
