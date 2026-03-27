@@ -17,6 +17,7 @@
   let tokenInterval = null;
   let usageLimits = $state(null);
   let sessionKeyInput = $state('');
+  let appVersion = $state('');
   let sessionKeyConfigured = $state(false);
   let showKeyEdit = $state(false);
   let usageRefreshInterval = null;
@@ -415,6 +416,7 @@
     console.log(`[TIMING] onMount start`);
 
     applyTheme(currentTheme);
+    invoke("get_app_version").then(v => appVersion = v).catch(() => {});
 
     // Priority 1: Load profiles (fast, <10ms)
     loadProfiles();
@@ -560,6 +562,7 @@
       Set up usage tracking in Settings
     </span>
   {/if}
+  {#if appVersion}<span class="bottom-version">v{appVersion}</span>{/if}
 </div>
 </div>
 
@@ -747,7 +750,10 @@
   .badge { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; }
   .wt-badge { font-size: 8px; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: rgba(210, 168, 255, 0.2); color: #d2a8ff; letter-spacing: 0.5px; }
   .time { font-size: 11px; color: var(--text-secondary); }
-  .bottom-bar { display: flex; align-items: center; justify-content: center; gap: 16px; padding: 4px 16px; background: var(--sidebar-bg); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .bottom-bar { display: flex; align-items: center; gap: 16px; padding: 4px 16px; background: var(--sidebar-bg); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .bottom-link { display: flex; align-items: center; gap: 4px; border: none; background: none; color: var(--text-secondary); font-size: 10px; font-family: inherit; cursor: pointer; padding: 2px 0; transition: color 0.15s; white-space: nowrap; }
+  .bottom-link:hover { color: var(--accent); }
+  .bottom-version { margin-left: auto; font-size: 10px; color: var(--text-secondary); font-family: monospace; opacity: 0.6; white-space: nowrap; }
   .limit-meter { display: flex; align-items: center; gap: 6px; }
   .limit-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; width: 42px; }
   .limit-track { width: 100px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }

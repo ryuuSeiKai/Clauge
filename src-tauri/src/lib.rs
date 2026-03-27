@@ -686,6 +686,12 @@ fn load_session_key() -> Result<Option<String>, String> {
     }
 }
 
+/// Get app version from Cargo.toml
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Update the tray title text (shown in menu bar)
 #[tauri::command]
 fn update_tray_title(app_handle: tauri::AppHandle, title: String) -> Result<(), String> {
@@ -902,6 +908,7 @@ pub fn run() {
             discover_sessions,
             get_session_tokens,
             fetch_usage_limits,
+            get_app_version,
             update_tray_title,
             save_session_key,
             load_session_key,
