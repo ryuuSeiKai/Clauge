@@ -227,7 +227,7 @@
         let existingSessionIds = [];
         if (!profile.claudeSessionId) {
           try {
-            const existing = await invoke("discover_sessions", { projectPath: profile.projectPath });
+            const existing = await invoke("discover_sessions", { projectPath: spawnPath });
             existingSessionIds = existing.map(s => s.sessionId);
           } catch(e) {}
         }
@@ -251,7 +251,7 @@
             outputReceived = true;
             setTimeout(async () => {
               try {
-                const allSessions = await invoke("discover_sessions", { projectPath: profile.projectPath });
+                const allSessions = await invoke("discover_sessions", { projectPath: spawnPath });
                 const newSession = allSessions.find(s => !existingSessionIds.includes(s.sessionId));
                 if (newSession) {
                   await invoke("update_session_id", { id: profile.id, claudeSessionId: newSession.sessionId });
