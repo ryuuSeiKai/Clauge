@@ -69,6 +69,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
+          releaseBody: 'A new version is available with improvements and bug fixes. Restart to apply the update.'
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
