@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use tauri::ipc::Channel;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{TrayIconBuilder, TrayIconId};
@@ -775,7 +776,6 @@ fn spawn_terminal(
     state
         .terminals
         .lock()
-        .map_err(|e| format!("Lock error: {}", e))?
         .insert(terminal_id.clone(), entry);
 
     Ok(terminal_id)
@@ -828,7 +828,7 @@ fn spawn_shell(
         }
     });
 
-    state.terminals.lock().map_err(|e| format!("Lock error: {}", e))?
+    state.terminals.lock()
         .insert(terminal_id.clone(), TerminalEntry { master: pty_pair.master, writer, child });
 
     Ok(terminal_id)
@@ -842,8 +842,7 @@ fn write_to_terminal(
 ) -> Result<(), String> {
     let mut terminals = state
         .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
+        .lock();
 
     let entry = terminals
         .get_mut(&terminal_id)
@@ -871,8 +870,7 @@ fn resize_terminal(
 ) -> Result<(), String> {
     let terminals = state
         .terminals
-        .lock()
-        .map_err(|e| format!("Lock error: {}", e))?;
+        .lock();
 
     let entry = terminals.get(&terminal_id).ok_or("Terminal not found")?;
 
