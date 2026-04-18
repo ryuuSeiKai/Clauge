@@ -15,6 +15,16 @@
   let pluginSearch = $state('');
   let installingPlugin = $state('');
   let pluginTab = $state('installed');
+
+  // Context manager
+  let contextSnippets = $state([]);
+  let contextEditing = $state(null); // { name, content } or null
+  let contextNewName = $state('');
+  let contextNewContent = $state('');
+  let modalContexts = $state([]); // selected context names for new session
+  let showContextPicker = $state(false); // for running sessions
+  let modalContextEnabled = $state(false);
+  let showContextDropdown = $state(false);
   let currentTerminalId = null;
   let terminalEl;
   let statusMsg = $state("Ready");
@@ -74,6 +84,27 @@
   let profileMenuOpen = $state(false);
   let sessionActivity = $state({}); // profileId → 'active' | 'done' | null
   let gitChanges = $state({}); // profileId → count of changes
+  let gitBranch = $state('');
+  let gitFiles = $state([]); // GitFileChange[]
+  let gitPanelOpen = $state(false);
+  let gitTab = $state('changes'); // 'changes' | 'history' | 'branches'
+  let gitCommitMsg = $state('');
+  let gitLoading = $state('');
+  let gitAhead = $state(0);
+  let gitBehind = $state(0);
+  let gitMsg = $state('');
+
+  // Usage dashboard
+  let showDashboard = $state(false);
+  let dashboardData = $state(null);
+  let dashboardLoading = $state(false);
+  let dashboardDays = $state(30);
+  let usageRefreshMins = $state(typeof localStorage !== 'undefined' ? parseInt(localStorage.getItem('clauge-usage-refresh') || '5') : 5);
+  let gitDiff = $state('');
+  let gitDiffFile = $state('');
+  let gitCommits = $state([]);
+  let gitBranches = $state([]);
+  let stagedFiles = $state(new Set());
 
   // Theme state
   let currentTheme = $state(typeof localStorage !== 'undefined' ? (localStorage.getItem('clauge-theme') || 'dark') : 'dark');
@@ -104,6 +135,9 @@
   let modalExistingSessions = $state([]);
   let modalSelectedSession = $state("");
   let modalCustomPrompt = $state("");
+  let modalGitEnabled = $state(false);
+  let modalGitName = $state("");
+  let modalGitEmail = $state("");
 
   const purposes = [
     { label: "Brainstorming", color: "#d2a8ff" },
@@ -426,12 +460,7 @@
       showTermEntry(entry);
       if (shellOpen) spawnShellForProfile(profile);
       statusMsg = profile.title;
-      // Refresh git status badge
-      const gitPath = profile.worktreePath || profile.projectPath;
-      invoke("get_git_status", { projectPath: gitPath }).then(changes => {
-        gitChanges[profile.id] = changes.length;
-        gitChanges = {...gitChanges};
-      }).catch(() => {});
+      refreshGitStatus();
     } else {
       statusMsg = "Spawning...";
       if (!entry) {
@@ -584,11 +613,12 @@
         showTermEntry(entry);
         if (shellOpen) spawnShellForProfile(profile);
 
-        // Fetch git status for badge
-        invoke("get_git_status", { projectPath: spawnPath }).then(changes => {
-          gitChanges[profile.id] = changes.length;
-          gitChanges = {...gitChanges};
-        }).catch(() => {});
+        refreshGitStatus();
+
+        // Inject attached contexts into CLAUDE.md
+        if (profile.contexts && profile.contexts.length > 0) {
+          invoke("inject_session_context", { projectPath: spawnPath, contextNames: profile.contexts }).catch(() => {});
+        }
 
         entry.fitAddon.fit();
         const dims = entry.fitAddon.proposeDimensions();
@@ -619,6 +649,9 @@
         projectPath: modalPath,
         skipPermissions: modalSkipPermissions,
         customPrompt: modalPurpose === 'Custom' && modalCustomPrompt.trim() ? modalCustomPrompt.trim() : null,
+        gitName: modalGitEnabled && modalGitName.trim() ? modalGitName.trim() : null,
+        gitEmail: modalGitEnabled && modalGitEmail.trim() ? modalGitEmail.trim() : null,
+        contexts: modalContexts.length > 0 ? modalContexts : null,
       });
       // Link existing session if selected (Custom purpose only)
       if (modalSelectedSession) {
@@ -628,6 +661,7 @@
       showModal = false;
       modalPath = ""; modalTitle = ""; modalPurpose = ""; modalSkipPermissions = false;
       modalExistingSessions = []; modalSelectedSession = ""; modalCustomPrompt = "";
+      modalGitEnabled = false; modalGitName = ""; modalGitEmail = ""; modalContexts = []; modalContextEnabled = false; showContextDropdown = false;
       await loadProfiles();
       await selectProfile(profile);
     } catch (e) { statusMsg = "Create failed: " + e; }
@@ -709,6 +743,207 @@
 
   let grouped = $derived(groupByProject(profiles));
 
+  async function refreshGitStatus() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    try {
+      const [branch, files, aheadBehind] = await Promise.all([
+        invoke("get_git_branch", { projectPath: path }),
+        invoke("get_git_status", { projectPath: path }),
+        invoke("get_git_ahead_behind", { projectPath: path }).catch(() => [0, 0]),
+      ]);
+      gitBranch = branch;
+      gitFiles = files;
+      gitAhead = aheadBehind[0] || 0;
+      gitBehind = aheadBehind[1] || 0;
+      gitChanges[activeProfile.id] = files.length;
+      gitChanges = {...gitChanges};
+    } catch(_) { gitBranch = ''; gitFiles = []; gitAhead = 0; gitBehind = 0; }
+  }
+
+  function showGitMsg(msg, duration = 3000) {
+    gitMsg = msg;
+    setTimeout(() => { if (gitMsg === msg) gitMsg = ''; }, duration);
+  }
+
+  async function doGitCommit() {
+    if (!activeProfile || !gitCommitMsg.trim()) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    gitLoading = 'commit';
+    try {
+      const result = await invoke("git_commit", { projectPath: path, message: gitCommitMsg.trim() });
+      gitCommitMsg = '';
+      showGitMsg(result.includes('Nothing') ? 'Nothing to commit' : 'Committed');
+      await refreshGitStatus();
+    } catch(e) { showGitMsg('Commit failed'); }
+    gitLoading = '';
+  }
+
+  async function doGitPush() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    gitLoading = 'push';
+    try {
+      await invoke("git_push", { projectPath: path });
+      showGitMsg('Pushed');
+      await refreshGitStatus();
+    } catch(e) { showGitMsg('Push failed'); }
+    gitLoading = '';
+  }
+
+  async function doGitPull() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    gitLoading = 'pull';
+    try {
+      await invoke("git_pull", { projectPath: path });
+      showGitMsg('Pulled');
+      await refreshGitStatus();
+    } catch(e) { showGitMsg('Pull failed'); }
+    gitLoading = '';
+  }
+
+  async function viewDiff(file) {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    gitDiffFile = file.path;
+    try { gitDiff = await invoke("git_diff_file", { projectPath: path, filePath: file.path }); } catch(_) { gitDiff = 'Failed to load diff'; }
+  }
+
+  async function toggleStageFile(file) {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    const isStaged = stagedFiles.has(file.path);
+    try {
+      if (isStaged) {
+        await invoke("git_unstage_file", { projectPath: path, filePath: file.path });
+        stagedFiles.delete(file.path);
+      } else {
+        await invoke("git_stage_file", { projectPath: path, filePath: file.path });
+        stagedFiles.add(file.path);
+      }
+      stagedFiles = new Set(stagedFiles);
+      await refreshGitStatus();
+    } catch(_) {}
+  }
+
+  async function doGitCommitStaged() {
+    if (!activeProfile || !gitCommitMsg.trim()) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    gitLoading = 'commit';
+    try {
+      // If no files manually staged, stage all
+      if (stagedFiles.size === 0) {
+        await invoke("git_commit", { projectPath: path, message: gitCommitMsg.trim() });
+      } else {
+        // Commit only staged files
+        const output = await invoke("git_commit", { projectPath: path, message: gitCommitMsg.trim() });
+      }
+      gitCommitMsg = '';
+      stagedFiles = new Set();
+      showGitMsg('Committed');
+      await refreshGitStatus();
+    } catch(e) { showGitMsg('Commit failed'); }
+    gitLoading = '';
+  }
+
+  async function loadGitHistory() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    try { gitCommits = await invoke("git_log", { projectPath: path, limit: 20 }); } catch(_) { gitCommits = []; }
+  }
+
+  async function loadGitBranches() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    try { gitBranches = await invoke("git_list_branches", { projectPath: path }); } catch(_) { gitBranches = []; }
+  }
+
+  async function switchBranch(branchName) {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    try {
+      await invoke("git_switch_branch", { projectPath: path, branchName });
+      showGitMsg(`Switched to ${branchName}`);
+      await refreshGitStatus();
+      await loadGitBranches();
+    } catch(e) {
+      const err = String(e);
+      if (err.includes('uncommitted') || err.includes('overwritten') || err.includes('changes')) {
+        showGitMsg('Commit or stash changes first', 5000);
+      } else {
+        showGitMsg('Switch failed: ' + err.slice(0, 50), 5000);
+      }
+    }
+  }
+
+  async function doGitStash() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    try {
+      await invoke("git_stash", { projectPath: path });
+      showGitMsg('Stashed');
+      await refreshGitStatus();
+    } catch(e) { showGitMsg('Stash failed'); }
+  }
+
+  async function doGitStashPop() {
+    if (!activeProfile) return;
+    const path = activeProfile.worktreePath || activeProfile.projectPath;
+    try {
+      await invoke("git_stash_pop", { projectPath: path });
+      showGitMsg('Stash applied');
+      await refreshGitStatus();
+    } catch(e) { showGitMsg('Stash pop failed'); }
+  }
+
+  function handleFileDrop(e) {
+    if (!activeTermEntry?.terminalId) return;
+    // Try web File API path (Tauri exposes file.path)
+    const files = e.dataTransfer?.files;
+    if (files && files.length > 0) {
+      const paths = Array.from(files).map(f => f.path || f.name).filter(Boolean);
+      if (paths.length > 0) {
+        const text = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+        invoke("write_to_terminal", { terminalId: activeTermEntry.terminalId, data: text }).catch(() => {});
+        return;
+      }
+    }
+    // Fallback: try text/uri-list
+    const uriList = e.dataTransfer?.getData('text/uri-list');
+    if (uriList) {
+      const paths = uriList.split('\n').filter(l => l && !l.startsWith('#')).map(u => {
+        try { return decodeURIComponent(new URL(u).pathname); } catch(_) { return u; }
+      });
+      if (paths.length > 0) {
+        const text = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+        invoke("write_to_terminal", { terminalId: activeTermEntry.terminalId, data: text }).catch(() => {});
+      }
+    }
+  }
+
+  async function loadDashboard() {
+    dashboardLoading = true;
+    try {
+      dashboardData = await invoke("get_usage_analytics", { days: dashboardDays });
+    } catch(e) { console.error('Dashboard failed:', e); dashboardData = null; }
+    dashboardLoading = false;
+  }
+
+  function formatCost(v) { return v < 0.01 ? '<$0.01' : `$${v.toFixed(2)}`; }
+  function formatTokens(v) { return v >= 1000000 ? `${(v/1000000).toFixed(1)}M` : v >= 1000 ? `${(v/1000).toFixed(1)}k` : String(v); }
+  function decodeProjectName(encoded) {
+    // Encoded paths use - for / and - for . — extract the last meaningful part
+    const parts = encoded.split('-').filter(Boolean);
+    // Find the last non-trivial segment (skip Users, macbook, etc.)
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (parts[i].length > 2 && !['Users','home','macbook','Personal','Projects','Documents','Desktop','Work'].includes(parts[i])) {
+        return parts[i];
+      }
+    }
+    return parts[parts.length - 1] || encoded;
+  }
+
   async function loadExistingSessions(path) {
     try {
       const sessions = await invoke("discover_sessions", { projectPath: path });
@@ -740,7 +975,7 @@
     }
     if (e.metaKey && e.key === 'b') { e.preventDefault(); toggleSidebar(); }
     if (e.metaKey && e.key === 'l') { e.preventDefault(); toggleShell(); }
-    if (e.key === 'Escape') { showModal = false; showSettings = false; modalExistingSessions = []; modalSelectedSession = ""; modalCustomPrompt = ""; }
+    if (e.key === 'Escape') { showModal = false; showSettings = false; modalExistingSessions = []; modalSelectedSession = ""; modalCustomPrompt = ""; modalGitEnabled = false; modalGitName = ""; modalGitEmail = ""; modalContexts = []; modalContextEnabled = false; showContextDropdown = false; }
   }
 
   function handleWindowResize() {
@@ -1043,6 +1278,34 @@ Anti-patterns to avoid:
     } catch(_) {}
   }
 
+  async function loadContextSnippets() {
+    try { contextSnippets = await invoke("get_context_snippets"); } catch(_) { contextSnippets = []; }
+  }
+  async function saveContextSnippet() {
+    if (!contextNewName.trim() || !contextNewContent.trim()) return;
+    try {
+      await invoke("save_context_snippet", { name: contextNewName.trim(), content: contextNewContent.trim() });
+      contextNewName = ''; contextNewContent = '';
+      contextEditing = null;
+      await loadContextSnippets();
+    } catch(_) {}
+  }
+  async function deleteContextSnippet(name) {
+    try { await invoke("delete_context_snippet", { name }); await loadContextSnippets(); } catch(_) {}
+  }
+  async function attachContextsToSession(profileId, projectPath, contextNames) {
+    try {
+      await invoke("update_session_contexts", { id: profileId, contexts: contextNames });
+      await invoke("inject_session_context", { projectPath, contextNames });
+    } catch(e) { console.error('Context inject failed:', e); }
+  }
+  async function detachContextsFromSession(profileId, projectPath) {
+    try {
+      await invoke("update_session_contexts", { id: profileId, contexts: [] });
+      await invoke("remove_injected_context", { projectPath });
+    } catch(_) {}
+  }
+
   async function loadClaudePlugins() {
     try { claudePlugins = await invoke("get_claude_plugins"); } catch(_) { claudePlugins = []; }
     try { marketplacePlugins = await invoke("get_marketplace_plugins"); } catch(_) { marketplacePlugins = []; }
@@ -1116,6 +1379,19 @@ Anti-patterns to avoid:
     invoke("get_claude_plan").then(p => { if (p) claudePlan = p; }).catch(() => {});
 
 
+    // Listen for Tauri native file drop events
+    import("@tauri-apps/api/webviewWindow").then(({ getCurrentWebviewWindow }) => {
+      getCurrentWebviewWindow().onDragDropEvent((event) => {
+        if (event.payload.type === 'drop' && activeTermEntry?.terminalId) {
+          const paths = event.payload.paths || [];
+          if (paths.length > 0) {
+            const text = paths.map(p => p.includes(' ') ? `"${p}"` : p).join(' ');
+            invoke("write_to_terminal", { terminalId: activeTermEntry.terminalId, data: text }).catch(() => {});
+          }
+        }
+      });
+    }).catch(() => {});
+
     // Priority 1: Load profiles (fast, <10ms)
     loadProfiles();
 
@@ -1129,10 +1405,13 @@ Anti-patterns to avoid:
       }
     }).catch(() => {});
 
+    // Poll git status every 5 seconds when a session is active
+    setInterval(() => { if (activeProfile) refreshGitStatus(); }, 5000);
+
   });
 </script>
 
-<svelte:window onkeydown={handleGlobalKeydown} onresize={handleWindowResize} onclick={() => { menuProfile = null; profileMenuOpen = false; }} oncontextmenu={(e) => { if (!import.meta.env.DEV) e.preventDefault(); }} />
+<svelte:window onkeydown={handleGlobalKeydown} onresize={handleWindowResize} onclick={() => { menuProfile = null; profileMenuOpen = false; gitPanelOpen = false; showContextDropdown = false; }} oncontextmenu={(e) => { if (!import.meta.env.DEV) e.preventDefault(); }} />
 
 <div class="app-wrapper">
 <div class="app">
@@ -1142,7 +1421,7 @@ Anti-patterns to avoid:
     <div class="sidebar-header">
       <span class="app-title">Clauge {#if claudePlan}<span class="plan-badge">{claudePlan}</span>{/if}</span>
       <div class="header-actions">
-        <button class="new-btn" onclick={() => showModal = true} title="New Session (Cmd+N)">+</button>
+        <button class="new-btn" onclick={() => { showModal = true; loadContextSnippets(); }} title="New Session (Cmd+N)">+</button>
       </div>
     </div>
     <div class="sidebar-content">
@@ -1174,9 +1453,6 @@ Anti-patterns to avoid:
                       {#if profile.worktreeBranch}
                         <span class="wt-badge" title="Isolated worktree: {profile.worktreeBranch}">WT</span>
                       {/if}
-                      {#if gitChanges[profile.id] > 0}
-                        <span class="git-badge">{gitChanges[profile.id]} changes</span>
-                      {/if}
                       <span class="time">{relativeTime(profile.lastUsedAt)}</span>
                     </div>
                     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
@@ -1186,6 +1462,10 @@ Anti-patterns to avoid:
                     {#if menuProfile?.id === profile.id}
                       <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
                       <div class="session-menu" onclick={(e) => e.stopPropagation()}>
+                        <button class="session-menu-item" onclick={() => { menuProfile = null; showContextPicker = profile; loadContextSnippets(); }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                          Add Contexts
+                        </button>
                         <button class="session-menu-item danger" onclick={() => { menuProfile = null; deleteConfirm = profile; }}>
                           <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zM11 3V1.75A1.75 1.75 0 009.25 0h-2.5A1.75 1.75 0 005 1.75V3H2.75a.75.75 0 000 1.5h.928l.747 10.218A1.75 1.75 0 006.172 16h3.656a1.75 1.75 0 001.747-1.282L12.322 4.5h.928a.75.75 0 000-1.5H11zm-5.522 1.5l.735 10.06a.25.25 0 00.249.19h3.076a.25.25 0 00.249-.19l.735-10.06H5.478z"/></svg>
                           Delete
@@ -1213,7 +1493,9 @@ Anti-patterns to avoid:
 
   <div class="terminal-wrapper" bind:this={wrapperEl}>
     <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="terminal-area" class:panel-focused={focusedPanel === 'claude'} onclick={() => focusedPanel = 'claude'}>
+    <div class="terminal-area" class:panel-focused={focusedPanel === 'claude'} onclick={() => focusedPanel = 'claude'}
+      ondragover={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+      ondrop={(e) => { e.preventDefault(); handleFileDrop(e); }}>
       {#if !activeProfile}
         <div class="empty-state">
           <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--border)" stroke-width="1.5">
@@ -1255,6 +1537,10 @@ Anti-patterns to avoid:
             <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
             Plugins
           </button>
+          <button class="pm-item" onclick={() => { profileMenuOpen = false; showDashboard = true; loadDashboard(); }}>
+            <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+            Usage Dashboard
+          </button>
           <div class="pm-sep"></div>
           <button class="pm-item" onclick={() => { profileMenuOpen = false; openExternal('https://clauge.ssh-i.in/changelog.html'); }}>
             <svg viewBox="0 0 24 24"><path d="M12 2L15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26z"/></svg>
@@ -1274,13 +1560,132 @@ Anti-patterns to avoid:
         </div>
       {/if}
     </div>
+    {#if activeProfile && gitBranch}
+    <div class="git-status-wrap">
+      <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+      <div class="git-status-bar" onclick={(e) => { e.stopPropagation(); gitPanelOpen = !gitPanelOpen; }}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
+        <span class="git-bar-branch">{gitBranch}</span>
+        {#if gitAhead > 0}
+          <span class="git-bar-ahead" title="{gitAhead} unpushed">↑{gitAhead}</span>
+        {/if}
+        {#if gitBehind > 0}
+          <span class="git-bar-behind" title="{gitBehind} to pull">↓{gitBehind}</span>
+        {/if}
+        {#if gitFiles.length > 0}
+          <span class="git-bar-changes">{gitFiles.length}</span>
+        {/if}
+        {#if gitMsg}
+          <span class="git-bar-msg">{gitMsg}</span>
+        {/if}
+      </div>
+      {#if gitPanelOpen}
+        <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+        <div class="git-popup" onclick={(e) => e.stopPropagation()}>
+          <div class="git-popup-tabs">
+            <button class="git-popup-tab" class:active={gitTab === 'changes'} onclick={() => gitTab = 'changes'}>Changes{gitFiles.length > 0 ? ` (${gitFiles.length})` : ''}</button>
+            <button class="git-popup-tab" class:active={gitTab === 'history'} onclick={() => { gitTab = 'history'; loadGitHistory(); }}>History</button>
+            <button class="git-popup-tab" class:active={gitTab === 'branches'} onclick={() => { gitTab = 'branches'; loadGitBranches(); }}>Branches</button>
+            <div class="git-popup-tab-actions">
+              <button class="git-action-btn has-tooltip" onclick={doGitStash}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>
+                <span class="btn-tooltip">Stash</span>
+              </button>
+              <button class="git-action-btn has-tooltip" onclick={doGitStashPop}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h14a2 2 0 012 2v14a2 2 0 01-2 2z"/><polyline points="12 8 12 16"/><polyline points="8 12 12 8 16 12"/></svg>
+                <span class="btn-tooltip">Pop Stash</span>
+              </button>
+              <button class="git-action-btn has-tooltip" disabled={gitLoading === 'pull'} onclick={doGitPull}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><polyline points="19 12 12 19 5 12"/></svg>
+                <span class="btn-tooltip">{gitLoading === 'pull' ? 'Pulling...' : 'Pull'}</span>
+              </button>
+              <button class="git-action-btn has-tooltip" disabled={gitLoading === 'push'} onclick={doGitPush}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
+                <span class="btn-tooltip">{gitLoading === 'push' ? 'Pushing...' : 'Push'}</span>
+              </button>
+            </div>
+          </div>
+
+          {#if gitTab === 'changes'}
+            {#if gitDiffFile}
+              <div class="git-diff-header">
+                <button class="git-diff-back" onclick={() => { gitDiffFile = ''; gitDiff = ''; }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="15 18 9 12 15 6"/></svg>
+                </button>
+                <span class="git-diff-filename">{gitDiffFile}</span>
+              </div>
+              <div class="git-diff-view">
+                {#each gitDiff.split('\n') as line}
+                  <div class="git-diff-line" class:diff-add={line.startsWith('+')} class:diff-del={line.startsWith('-')} class:diff-hunk={line.startsWith('@@')}>{line}</div>
+                {/each}
+              </div>
+            {:else if gitFiles.length > 0}
+              <div class="git-file-list">
+                {#each gitFiles as file}
+                  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+                  <div class="git-file-item" onclick={() => viewDiff(file)}>
+                    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+                    <span class="git-file-stage" onclick={(e) => { e.stopPropagation(); toggleStageFile(file); }} title={stagedFiles.has(file.path) ? 'Unstage' : 'Stage'}>
+                      {#if stagedFiles.has(file.path)}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="var(--accent)"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+                      {:else}
+                        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+                      {/if}
+                    </span>
+                    <span class="git-file-status" class:modified={file.status === 'M'} class:added={file.status === 'A' || file.status === '??'} class:deleted={file.status === 'D'} class:renamed={file.status === 'R'}>{file.status === '??' ? 'U' : file.status}</span>
+                    <span class="git-file-path">{file.path}</span>
+                  </div>
+                {/each}
+              </div>
+              <div class="git-commit-row">
+                <input class="git-commit-input" type="text" bind:value={gitCommitMsg} placeholder="Commit message..." onkeydown={(e) => { if (e.key === 'Enter' && gitCommitMsg.trim()) doGitCommitStaged(); }} />
+                <button class="git-commit-btn" disabled={!gitCommitMsg.trim() || gitLoading === 'commit'} onclick={doGitCommitStaged}>
+                  {gitLoading === 'commit' ? '...' : 'Commit'}
+                </button>
+              </div>
+            {:else}
+              <div class="git-empty">Working tree clean</div>
+            {/if}
+
+          {:else if gitTab === 'history'}
+            <div class="git-history-list">
+              {#each gitCommits as commit}
+                <div class="git-commit-item">
+                  <span class="git-commit-hash">{commit.short}</span>
+                  <span class="git-commit-message">{commit.message}</span>
+                  <span class="git-commit-date">{commit.date}</span>
+                </div>
+              {:else}
+                <div class="git-empty">No commits</div>
+              {/each}
+            </div>
+
+          {:else if gitTab === 'branches'}
+            <div class="git-branch-list">
+              {#each gitBranches as branch}
+                <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+                <div class="git-branch-item" class:current={branch.current} onclick={() => { if (!branch.current) switchBranch(branch.name); }}>
+                  {#if branch.current}
+                    <svg width="10" height="10" viewBox="0 0 16 16" fill="var(--accent)"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+                  {/if}
+                  <span class="git-branch-name-item">{branch.name}</span>
+                </div>
+              {:else}
+                <div class="git-empty">No branches</div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+    {/if}
   </div>
   <div class="bottom-center">
     {#if usageLimits}
       {@const sColor = usageLimits.sessionPercent > 80 ? '#f85149' : usageLimits.sessionPercent > 50 ? '#d29922' : 'var(--accent)'}
       {@const wColor = usageLimits.weeklyAllPercent > 80 ? '#f85149' : usageLimits.weeklyAllPercent > 50 ? '#d29922' : 'var(--accent)'}
       <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-      <div class="usage-chips-clickable" onclick={() => { showSettings = true; settingsTab = 'usage'; }}>
+      <div class="usage-chips-clickable" onclick={() => { showDashboard = true; loadDashboard(); }}>
         <div class="usage-chip"><span class="usage-dot" style="background:{sColor};box-shadow:0 0 6px {sColor}44;"></span><span class="usage-lbl">Session</span><span class="usage-val" style="color:{sColor}">{usageLimits.sessionPercent.toFixed(0)}%</span></div>
         <div class="usage-sep"></div>
         <div class="usage-chip"><span class="usage-dot" style="background:{wColor};box-shadow:0 0 6px {wColor}44;"></span><span class="usage-lbl">Weekly</span><span class="usage-val" style="color:{wColor}">{usageLimits.weeklyAllPercent.toFixed(0)}%</span></div>
@@ -1292,8 +1697,8 @@ Anti-patterns to avoid:
       </div>
     {:else}
       <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-      <span class="limit-loading" onclick={() => { showSettings = true; settingsTab = 'usage'; }} style="cursor:pointer;">
-        Set up usage tracking in Settings
+      <span class="limit-loading" onclick={() => { showDashboard = true; loadDashboard(); }} style="cursor:pointer;">
+        Set up usage tracking
       </span>
     {/if}
   </div>
@@ -1331,33 +1736,42 @@ Anti-patterns to avoid:
 
 {#if showModal}
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-<div class="modal-backdrop" onclick={(e) => { if (e.target === e.currentTarget) { showModal = false; modalExistingSessions = []; modalSelectedSession = ""; modalCustomPrompt = ""; } }}>
+<div class="modal-backdrop">
   <div class="modal">
     <h2>New Session</h2>
     <label>Project Folder
       <div class="row">
-        <input bind:value={modalPath} placeholder="/path/to/project" />
+        <input bind:value={modalPath} placeholder="/path/to/project" onblur={() => { if (modalPath.trim()) loadExistingSessions(modalPath); }} />
         <button onclick={browsePath}>Browse</button>
       </div>
     </label>
     <label>Title
       <input bind:value={modalTitle} placeholder="e.g. Auth Refactor" />
     </label>
-    <label>Purpose
+    <div class="form-group">
+      <span class="form-group-label">Purpose</span>
       <div class="chips">
         {#each purposes as p}
           {#if !modalPath.trim()}
-            <button class="chip" disabled style="opacity:0.3;cursor:not-allowed;">{p.label}</button>
+            <span class="chip disabled">{p.label}</span>
           {:else if p.label !== 'Custom' && profiles.some(pr => pr.projectPath === modalPath && pr.purpose === p.label)}
-            <button class="chip" disabled style="opacity:0.3;cursor:not-allowed;" title="{p.label} already active for this project">{p.label}</button>
+            <span class="chip disabled" title="{p.label} already active for this project">{p.label}</span>
           {:else}
-            <button class="chip" class:selected={modalPurpose === p.label}
+            <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+            <span class="chip" class:selected={modalPurpose === p.label}
               style={modalPurpose === p.label ? `background:${p.color}33;color:${p.color};border-color:${p.color}` : ''}
-              onclick={() => { modalPurpose = p.label; if (p.label === 'Custom' && modalPath.trim()) loadExistingSessions(modalPath); }}>{p.label}</button>
+              onclick={() => { modalPurpose = p.label; if (p.label === 'Custom' && modalPath.trim()) loadExistingSessions(modalPath); }}>{p.label}</span>
           {/if}
         {/each}
       </div>
-    </label>
+    </div>
+    {#if modalExistingSessions.length > 0 && modalPurpose !== 'Custom'}
+      <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+      <div class="session-found-hint" onclick={() => { modalPurpose = 'Custom'; }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>{modalExistingSessions.length} previous session{modalExistingSessions.length > 1 ? 's' : ''} found — <strong style="color:var(--accent);cursor:pointer;">resume via Custom</strong></span>
+      </div>
+    {/if}
     {#if modalPurpose === 'Custom'}
       {#if modalExistingSessions.length > 0}
         <label>Resume Existing Session
@@ -1370,9 +1784,11 @@ Anti-patterns to avoid:
         </label>
       {/if}
       <label>System Prompt <span style="font-size:10px;color:var(--text-secondary);font-weight:normal;">(optional)</span>
-        <textarea class="custom-prompt" bind:value={modalCustomPrompt} placeholder="e.g. Focus on performance optimization, avoid breaking changes..." rows="3"></textarea>
+        <textarea class="custom-prompt" bind:value={modalCustomPrompt} placeholder="Custom instructions for this session..." rows="2"></textarea>
       </label>
     {/if}
+
+    <div class="stg-section-label" style="margin-top:12px;margin-bottom:6px;">Advanced</div>
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
     <div class="toggle-row">
       <span class="toggle-label">Skip permissions
@@ -1382,9 +1798,70 @@ Anti-patterns to avoid:
         <span class="toggle-knob"></span>
       </button>
     </div>
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="toggle-row">
+      <span class="toggle-label">Git Identity</span>
+      <button class="toggle-switch" class:on={modalGitEnabled} onclick={() => modalGitEnabled = !modalGitEnabled}>
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+    {#if modalGitEnabled}
+      <div class="advanced-section">
+        <div class="advanced-row">
+          <label class="advanced-label">Name <span class="required">*</span>
+            <input type="text" bind:value={modalGitName} placeholder="e.g. John Doe" class="advanced-input" />
+          </label>
+          <label class="advanced-label">Email <span class="required">*</span>
+            <input type="email" bind:value={modalGitEmail} placeholder="e.g. john@example.com" class="advanced-input" />
+          </label>
+        </div>
+      </div>
+    {/if}
+    <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+    <div class="toggle-row">
+      <span class="toggle-label">Attach Contexts</span>
+      <button class="toggle-switch" class:on={modalContextEnabled} onclick={() => modalContextEnabled = !modalContextEnabled}>
+        <span class="toggle-knob"></span>
+      </button>
+    </div>
+    {#if modalContextEnabled}
+      <div class="advanced-section">
+        {#if modalContexts.length > 0}
+          <div class="ctx-attached-chips">
+            {#each modalContexts as name}
+              <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+              <span class="ctx-attached-chip">
+                {name}
+                <span class="ctx-chip-remove" onclick={() => { modalContexts = modalContexts.filter(c => c !== name); }}>×</span>
+              </span>
+            {/each}
+          </div>
+        {/if}
+        <div class="ctx-add-wrap">
+          <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+          <button class="ctx-add-btn" onclick={(e) => { e.stopPropagation(); showContextDropdown = !showContextDropdown; }}>
+            <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor"><path d="M7.75 2a.75.75 0 01.75.75V7h4.25a.75.75 0 010 1.5H8.5v4.25a.75.75 0 01-1.5 0V8.5H2.75a.75.75 0 010-1.5H7V2.75A.75.75 0 017.75 2z"/></svg>
+            Add
+          </button>
+          {#if showContextDropdown}
+            <div class="ctx-dropdown">
+              {#each contextSnippets.filter(c => !modalContexts.includes(c.name)) as ctx}
+                <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+                <div class="ctx-dropdown-item" onclick={() => { modalContexts = [...modalContexts, ctx.name]; showContextDropdown = false; }}>
+                  <span class="ctx-dropdown-name">{ctx.name}</span>
+                  <span class="ctx-dropdown-preview">{ctx.preview}</span>
+                </div>
+              {:else}
+                <div class="ctx-dropdown-empty">No more contexts available</div>
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
     <div class="modal-actions">
-      <button onclick={() => { showModal = false; modalExistingSessions = []; modalSelectedSession = ""; modalCustomPrompt = ""; }}>Cancel</button>
-      <button class="create-btn" disabled={!modalPath || !modalTitle || !modalPurpose} onclick={createSession}>Create</button>
+      <button onclick={() => { showModal = false; modalExistingSessions = []; modalSelectedSession = ""; modalCustomPrompt = ""; modalGitEnabled = false; modalGitName = ""; modalGitEmail = ""; modalContexts = []; modalContextEnabled = false; showContextDropdown = false; }}>Cancel</button>
+      <button class="create-btn" disabled={!modalPath || !modalTitle || !modalPurpose || (modalGitEnabled && (!modalGitName.trim() || !modalGitEmail.trim()))} onclick={createSession}>Create</button>
     </div>
   </div>
 </div>
@@ -1392,7 +1869,7 @@ Anti-patterns to avoid:
 
 {#if showSettings}
 <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
-<div class="modal-backdrop" onclick={(e) => { if (e.target === e.currentTarget) showSettings = false; }}>
+<div class="modal-backdrop">
   <div class="stg-modal">
     <div class="stg-header">
       <span class="stg-title">Settings</span>
@@ -1404,13 +1881,13 @@ Anti-patterns to avoid:
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v1m0 16v1m-9-9h1m16 0h1m-2.636-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
           Appearance
         </button>
-        <button class="stg-tab" class:active={settingsTab === 'usage'} onclick={() => settingsTab = 'usage'}>
-          <svg viewBox="0 0 24 24"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
-          Usage
-        </button>
         <button class="stg-tab" class:active={settingsTab === 'plugins'} onclick={() => { settingsTab = 'plugins'; loadClaudePlugins(); }}>
           <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
           Plugins
+        </button>
+        <button class="stg-tab" class:active={settingsTab === 'contexts'} onclick={() => { settingsTab = 'contexts'; loadContextSnippets(); }}>
+          <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          Contexts
         </button>
         <button class="stg-tab" class:active={settingsTab === 'about'} onclick={() => settingsTab = 'about'}>
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
@@ -1457,105 +1934,6 @@ Anti-patterns to avoid:
           </div>
         </div>
       </div>
-
-    {:else if settingsTab === 'usage'}
-      {#if sessionKeyConfigured}
-        <div class="key-status">
-          <div class="key-status-row">
-            <span class="key-dot connected"></span>
-            <span style="font-size:12px;color:var(--text-primary);">Session key configured</span>
-            <span style="font-size:10px;color:var(--text-secondary);margin-left:auto;">Refreshes every 5 min</span>
-          </div>
-          {#if !showKeyEdit}
-            <div style="display:flex;gap:8px;margin-top:8px;">
-              <button class="save-key-btn" style="color:var(--text-secondary);border-color:var(--border);" onclick={() => showKeyEdit = true}>Edit Key</button>
-            </div>
-            {#if usageError}
-              <p style="font-size:11px;color:#f85149;margin:6px 0 0;">{usageError}</p>
-            {/if}
-          {:else}
-            <div style="margin-top:8px;">
-              <input type="password" bind:value={sessionKeyInput} placeholder="sk-ant-sid01-..." style="font-size:12px;margin-bottom:4px;" />
-              <p style="font-size:10px;color:var(--text-secondary);margin:0 0 8px;">Open <strong>claude.ai</strong> → DevTools (F12) → Application → Cookies → copy <strong>sessionKey</strong> value</p>
-              <div style="display:flex;gap:8px;">
-                <button class="save-key-btn" onclick={async () => {
-                  if (sessionKeyInput.trim()) {
-                    await invoke("save_session_key", { key: sessionKeyInput.trim() });
-                    sessionKeyConfigured = true;
-                    showKeyEdit = false;
-                    await loadUsageLimits();
-                  }
-                }}>Save</button>
-                <button class="save-key-btn" style="color:var(--text-secondary);border-color:var(--border);" onclick={() => showKeyEdit = false}>Cancel</button>
-              </div>
-            </div>
-          {/if}
-        </div>
-
-        {#if usageLimits}
-          <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:16px;">
-            <div class="usage-detail-row">
-              <div class="usage-detail-label">Session</div>
-              <div class="usage-detail-bar">
-                <div class="usage-detail-fill" style="width:{usageLimits.sessionPercent}%;background:{usageLimits.sessionPercent > 80 ? '#f85149' : usageLimits.sessionPercent > 50 ? '#d29922' : 'var(--accent)'}"></div>
-              </div>
-              <div class="usage-detail-pct" style="color:{usageLimits.sessionPercent > 80 ? '#f85149' : usageLimits.sessionPercent > 50 ? '#d29922' : 'var(--accent)'}">{usageLimits.sessionPercent.toFixed(1)}%</div>
-            </div>
-            {#if usageLimits.sessionResets}
-              <div class="usage-detail-resets">Resets {new Date(usageLimits.sessionResets).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
-            {/if}
-
-            <div class="usage-detail-row" style="margin-top:14px;">
-              <div class="usage-detail-label">Weekly</div>
-              <div class="usage-detail-bar">
-                <div class="usage-detail-fill" style="width:{usageLimits.weeklyAllPercent}%;background:{usageLimits.weeklyAllPercent > 80 ? '#f85149' : usageLimits.weeklyAllPercent > 50 ? '#d29922' : 'var(--accent)'}"></div>
-              </div>
-              <div class="usage-detail-pct" style="color:{usageLimits.weeklyAllPercent > 80 ? '#f85149' : usageLimits.weeklyAllPercent > 50 ? '#d29922' : 'var(--accent)'}">{usageLimits.weeklyAllPercent.toFixed(1)}%</div>
-            </div>
-            {#if usageLimits.weeklyAllResets}
-              <div class="usage-detail-resets">Resets {new Date(usageLimits.weeklyAllResets).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
-            {/if}
-
-            {#if usageLimits.weeklySonnetPercent != null}
-              <div class="usage-detail-row" style="margin-top:14px;">
-                <div class="usage-detail-label">Sonnet</div>
-                <div class="usage-detail-bar">
-                  <div class="usage-detail-fill" style="width:{usageLimits.weeklySonnetPercent}%;background:{usageLimits.weeklySonnetPercent > 80 ? '#f85149' : usageLimits.weeklySonnetPercent > 50 ? '#d29922' : 'var(--accent)'}"></div>
-                </div>
-                <div class="usage-detail-pct" style="color:{usageLimits.weeklySonnetPercent > 80 ? '#f85149' : usageLimits.weeklySonnetPercent > 50 ? '#d29922' : 'var(--accent)'}">{usageLimits.weeklySonnetPercent.toFixed(1)}%</div>
-              </div>
-              {#if usageLimits.weeklySonnetResets}
-                <div class="usage-detail-resets">Resets {new Date(usageLimits.weeklySonnetResets).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</div>
-              {/if}
-            {/if}
-
-            {#if claudePlan}
-              <div style="margin-top:14px;font-size:11px;color:var(--text-secondary);">Plan: <span style="text-transform:capitalize;color:var(--text-primary);">{claudePlan}</span></div>
-            {/if}
-          </div>
-        {/if}
-      {:else}
-        <div class="session-key-setup">
-          {#if usageError}
-            <p style="font-size:11px;color:#f85149;margin:0 0 8px;">{usageError}</p>
-          {:else}
-            <p style="font-size:12px;color:var(--text-primary);margin:0 0 8px;">Connect to claude.ai to see live usage limits</p>
-          {/if}
-          <label style="margin-bottom:6px;">Session Key
-            <input type="password" bind:value={sessionKeyInput} placeholder="sk-ant-sid01-..." style="margin-top:4px;font-size:12px;" />
-          </label>
-          <p style="font-size:10px;color:var(--text-secondary);margin:0 0 10px;">Open <strong>claude.ai</strong> → DevTools (F12) → Application → Cookies → copy <strong>sessionKey</strong> value</p>
-          <button class="save-key-btn" onclick={async () => {
-            if (sessionKeyInput.trim()) {
-              await invoke("save_session_key", { key: sessionKeyInput.trim() });
-              sessionKeyConfigured = true;
-              usageError = '';
-              await loadUsageLimits();
-              usageRefreshInterval = setInterval(loadUsageLimits, 5 * 60 * 1000);
-            }
-          }}>Connect</button>
-        </div>
-      {/if}
 
     {:else if settingsTab === 'plugins'}
       <div class="plugin-subtabs">
@@ -1617,6 +1995,52 @@ Anti-patterns to avoid:
           {/each}
         </div>
       {/if}
+
+    {:else if settingsTab === 'contexts'}
+      <div class="stg-section">
+        <div class="stg-section-label" style="display:flex;align-items:center;justify-content:space-between;">
+          Saved Contexts ({contextSnippets.length})
+          <button class="save-key-btn" style="font-size:10px;padding:3px 10px;" onclick={() => { contextEditing = { name: '', content: '' }; contextNewName = ''; contextNewContent = ''; }}>+ New</button>
+        </div>
+
+        {#if contextEditing}
+          <div class="ctx-editor">
+            <input type="text" class="ctx-name-input" bind:value={contextNewName} placeholder="Context name..." />
+            <textarea class="ctx-content-input" bind:value={contextNewContent} placeholder="Write your context, rules, or instructions..." rows="6"></textarea>
+            <div style="display:flex;gap:6px;justify-content:flex-end;">
+              <button class="save-key-btn" style="color:var(--text-secondary);border-color:var(--border);" onclick={() => contextEditing = null}>Cancel</button>
+              <button class="save-key-btn" disabled={!contextNewName.trim() || !contextNewContent.trim()} onclick={saveContextSnippet}>Save</button>
+            </div>
+          </div>
+        {/if}
+
+        <div class="ctx-list">
+          {#each contextSnippets as ctx}
+            {#if !contextEditing || contextEditing.name !== ctx.name}
+            <div class="ctx-card">
+              <div class="ctx-card-info">
+                <span class="ctx-card-name">{ctx.name}</span>
+                <span class="ctx-card-preview">{ctx.preview}</span>
+              </div>
+              <div class="ctx-card-actions">
+                <button class="ctx-action-btn" onclick={() => { contextEditing = ctx; contextNewName = ctx.name; contextNewContent = ctx.content; }} title="Edit">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="ctx-action-btn danger" onclick={() => deleteContextSnippet(ctx.name)} title="Delete">
+                  <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zM11 3V1.75A1.75 1.75 0 009.25 0h-2.5A1.75 1.75 0 005 1.75V3H2.75a.75.75 0 000 1.5h.928l.747 10.218A1.75 1.75 0 006.172 16h3.656a1.75 1.75 0 001.747-1.282L12.322 4.5h.928a.75.75 0 000-1.5H11z"/></svg>
+                </button>
+              </div>
+            </div>
+            {/if}
+          {:else}
+            {#if !contextEditing}
+              <div style="padding:20px;text-align:center;font-size:12px;color:var(--text-secondary);">
+                No contexts yet. Create one to attach to sessions.
+              </div>
+            {/if}
+          {/each}
+        </div>
+      </div>
 
     {:else if settingsTab === 'about'}
       <div class="about-content">
@@ -1686,7 +2110,7 @@ Anti-patterns to avoid:
 {/if}
 
 {#if showWhatsNew && updateReady}
-<div class="modal-backdrop" onclick={(e) => { if (e.target === e.currentTarget) showWhatsNew = false; }}>
+<div class="modal-backdrop">
   <div class="modal whats-new-modal">
     <h2>v{updateReady.version}</h2>
     <div class="whats-new-body">{@html (updateReady.body || '')
@@ -1703,6 +2127,244 @@ Anti-patterns to avoid:
     <div class="modal-actions">
       <button onclick={() => showWhatsNew = false}>Later</button>
       <button class="create-btn" onclick={() => { showWhatsNew = false; restartToUpdate(); }}>Restart</button>
+    </div>
+  </div>
+</div>
+{/if}
+
+{#if showDashboard}
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+<div class="modal-backdrop">
+  <div class="dash-modal">
+    <div class="dash-header">
+      <span class="dash-title">Usage Dashboard {#if claudePlan}<span class="dash-plan-badge">{claudePlan}</span>{/if}</span>
+      <div class="dash-header-right">
+        <select class="dash-period" bind:value={dashboardDays} onchange={() => loadDashboard()}>
+          <option value={7}>7 days</option>
+          <option value={30}>30 days</option>
+          <option value={90}>90 days</option>
+          <option value={9999}>All time</option>
+        </select>
+        <button class="stg-close" onclick={() => showDashboard = false}>&times;</button>
+      </div>
+    </div>
+    {#if dashboardLoading}
+      <div class="dash-loading"><div class="dash-spinner"></div>Analyzing sessions...</div>
+    {:else if dashboardData}
+      <div class="dash-body">
+        <div class="dash-stats">
+          <div class="dash-stat"><span class="dash-stat-value">{formatCost(dashboardData.totalCost)}</span><span class="dash-stat-label">Total Cost</span></div>
+          <div class="dash-stat"><span class="dash-stat-value">{dashboardData.totalApiCalls.toLocaleString()}</span><span class="dash-stat-label">API Calls</span></div>
+          <div class="dash-stat"><span class="dash-stat-value">{dashboardData.cacheHitPercent.toFixed(1)}%</span><span class="dash-stat-label">Cache Hit</span></div>
+          <div class="dash-stat"><span class="dash-stat-value">{dashboardData.totalSessions}</span><span class="dash-stat-label">Sessions</span></div>
+        </div>
+
+        <!-- Row 2: Tokens -->
+        <div class="dash-tokens-bar">
+          <span><strong>In:</strong> {formatTokens(dashboardData.totalInputTokens)}</span>
+          <span><strong>Out:</strong> {formatTokens(dashboardData.totalOutputTokens)}</span>
+          <span><strong>Cache R:</strong> {formatTokens(dashboardData.totalCacheReadTokens)}</span>
+          <span><strong>Cache W:</strong> {formatTokens(dashboardData.totalCacheWriteTokens)}</span>
+        </div>
+
+        <!-- Row 3: Chart -->
+        {#if dashboardData.daily.length > 0}
+          <div class="dash-section">
+            <div class="dash-section-label">Daily Activity</div>
+            <div class="dash-chart">
+              {#each dashboardData.daily.slice(-21) as day}
+                {@const mc = Math.max(...dashboardData.daily.slice(-21).map(d => d.cost), 0.01)}
+                <div class="dash-bar-wrap" title="{day.date}: {formatCost(day.cost)} · {day.calls} calls">
+                  <div class="dash-bar" style="height:{Math.max(3, (day.cost / mc) * 100)}%"></div>
+                  <span class="dash-bar-label">{day.date.slice(8)}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Row 4: Live Usage + Models -->
+        <div class="dash-grid">
+          <div class="dash-section">
+            <div class="dash-section-label">Live Usage</div>
+            {#if usageLimits}
+              <div style="display:flex;flex-direction:column;gap:8px;">
+                <div class="dash-live-row">
+                  <span class="dash-live-lbl">Session</span>
+                  <div class="dash-live-bar"><div style="width:{usageLimits.sessionPercent}%;background:{usageLimits.sessionPercent > 80 ? '#f85149' : usageLimits.sessionPercent > 50 ? '#d29922' : 'var(--accent)'};height:100%;border-radius:2px;"></div></div>
+                  <span class="dash-live-pct" style="color:{usageLimits.sessionPercent > 80 ? '#f85149' : usageLimits.sessionPercent > 50 ? '#d29922' : 'var(--accent)'}">{usageLimits.sessionPercent.toFixed(1)}%</span>
+                </div>
+                <div class="dash-live-row">
+                  <span class="dash-live-lbl">Weekly</span>
+                  <div class="dash-live-bar"><div style="width:{usageLimits.weeklyAllPercent}%;background:{usageLimits.weeklyAllPercent > 80 ? '#f85149' : usageLimits.weeklyAllPercent > 50 ? '#d29922' : 'var(--accent)'};height:100%;border-radius:2px;"></div></div>
+                  <span class="dash-live-pct" style="color:{usageLimits.weeklyAllPercent > 80 ? '#f85149' : usageLimits.weeklyAllPercent > 50 ? '#d29922' : 'var(--accent)'}">{usageLimits.weeklyAllPercent.toFixed(1)}%</span>
+                </div>
+                {#if usageLimits.weeklySonnetPercent != null}
+                  <div class="dash-live-row">
+                    <span class="dash-live-lbl">Sonnet</span>
+                    <div class="dash-live-bar"><div style="width:{usageLimits.weeklySonnetPercent}%;background:{usageLimits.weeklySonnetPercent > 80 ? '#f85149' : usageLimits.weeklySonnetPercent > 50 ? '#d29922' : 'var(--accent)'};height:100%;border-radius:2px;"></div></div>
+                    <span class="dash-live-pct" style="color:{usageLimits.weeklySonnetPercent > 80 ? '#f85149' : usageLimits.weeklySonnetPercent > 50 ? '#d29922' : 'var(--accent)'}">{usageLimits.weeklySonnetPercent.toFixed(1)}%</span>
+                  </div>
+                {/if}
+              </div>
+              {#if showKeyEdit}
+                <div style="margin-top:8px;">
+                  <input type="password" bind:value={sessionKeyInput} placeholder="sk-ant-sid01-..." style="padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-primary);font-size:11px;width:100%;margin-bottom:4px;" />
+                  <div style="display:flex;gap:6px;">
+                    <button class="save-key-btn" onclick={async () => {
+                      if (sessionKeyInput.trim()) {
+                        await invoke("save_session_key", { key: sessionKeyInput.trim() });
+                        sessionKeyConfigured = true; showKeyEdit = false;
+                        await loadUsageLimits();
+                      }
+                    }}>Save</button>
+                    <button class="save-key-btn" style="color:var(--text-secondary);border-color:var(--border);" onclick={() => showKeyEdit = false}>Cancel</button>
+                  </div>
+                </div>
+              {:else}
+                <div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+                  <span style="font-size:9px;color:var(--text-secondary);">Refresh every</span>
+                  <select class="dash-refresh-select" bind:value={usageRefreshMins} onchange={() => {
+                    localStorage.setItem('clauge-usage-refresh', String(usageRefreshMins));
+                    if (usageRefreshInterval) clearInterval(usageRefreshInterval);
+                    usageRefreshInterval = setInterval(loadUsageLimits, usageRefreshMins * 60 * 1000);
+                  }}>
+                    <option value={5}>5 min</option><option value={15}>15 min</option><option value={30}>30 min</option>
+                    <option value={60}>1 hour</option><option value={360}>6 hours</option><option value={720}>12 hours</option>
+                  </select>
+                  <button class="dash-edit-key" onclick={() => showKeyEdit = true} title="Update session key">
+                    Session Key
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                </div>
+              {/if}
+            {:else}
+              <div style="padding:8px 0;">
+                <p style="font-size:11px;color:var(--text-secondary);margin:0 0 8px;">Connect to see live session limits</p>
+                <input type="password" bind:value={sessionKeyInput} placeholder="sk-ant-sid01-..." style="padding:5px 8px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-primary);font-size:11px;width:100%;margin-bottom:6px;" />
+                <p style="font-size:9px;color:var(--text-secondary);margin:0 0 6px;">claude.ai → DevTools → Cookies → sessionKey</p>
+                <button class="save-key-btn" onclick={async () => {
+                  if (sessionKeyInput.trim()) {
+                    await invoke("save_session_key", { key: sessionKeyInput.trim() });
+                    sessionKeyConfigured = true; usageError = '';
+                    await loadUsageLimits();
+                    usageRefreshInterval = setInterval(loadUsageLimits, usageRefreshMins * 60 * 1000);
+                  }
+                }}>Connect</button>
+              </div>
+            {/if}
+          </div>
+          <div class="dash-section">
+            <div class="dash-section-label">Models</div>
+            {#each dashboardData.byModel as m}
+              <div class="dash-model-row">
+                <div class="dash-model-info"><span class="dash-model-name">{m.model}</span><span class="dash-model-meta">{m.calls} calls · {m.cacheHitPercent.toFixed(0)}% cache</span></div>
+                <span class="dash-model-cost">{formatCost(m.cost)}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <!-- Row 5: Projects + Top Sessions -->
+        <div class="dash-grid">
+          <div class="dash-section">
+            <div class="dash-section-label">Projects ({dashboardData.byProject.length})</div>
+            <div class="dash-scroll">
+              {#each dashboardData.byProject as p}
+                <div class="dash-model-row">
+                  <div class="dash-model-info"><span class="dash-model-name" title={p.project}>{decodeProjectName(p.project)}</span><span class="dash-model-meta">{p.sessions} sess · {p.calls} calls</span></div>
+                  <span class="dash-model-cost">{formatCost(p.cost)}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+          <div class="dash-section">
+            <div class="dash-section-label">Top Sessions</div>
+            <div class="dash-scroll">
+              {#each dashboardData.topSessions as s}
+                <div class="dash-model-row">
+                  <div class="dash-model-info"><span class="dash-model-name" title={s.project}>{decodeProjectName(s.project)}</span><span class="dash-model-meta">{s.model} · {s.sessionId.slice(0, 8)}</span></div>
+                  <span class="dash-model-cost">{formatCost(s.cost)}</span>
+                </div>
+              {/each}
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 5: Tools + Shell -->
+        <div class="dash-grid">
+          <div class="dash-section">
+            <div class="dash-section-label">Tools</div>
+            {#each dashboardData.tools.slice(0, 6) as t}
+              <div class="dash-tool-row">
+                <span class="dash-tool-name">{t.name}</span>
+                <div class="dash-tool-bar-bg"><div class="dash-tool-bar-fill" style="width:{Math.max(3, (t.count / (dashboardData.tools[0]?.count || 1)) * 100)}%"></div></div>
+                <span class="dash-tool-count">{t.count.toLocaleString()}</span>
+              </div>
+            {/each}
+          </div>
+          <div class="dash-section">
+            <div class="dash-section-label">Shell</div>
+            {#each dashboardData.shellCommands.slice(0, 6) as s}
+              <div class="dash-tool-row">
+                <span class="dash-tool-name" style="font-family:monospace;">{s.name}</span>
+                <div class="dash-tool-bar-bg"><div class="dash-tool-bar-fill" style="width:{Math.max(3, (s.count / (dashboardData.shellCommands[0]?.count || 1)) * 100)}%"></div></div>
+                <span class="dash-tool-count">{s.count.toLocaleString()}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      </div>
+    {:else}
+      <div class="dash-loading">No usage data found</div>
+    {/if}
+  </div>
+</div>
+{/if}
+
+{#if showContextPicker}
+<!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+<div class="modal-backdrop">
+  <div class="modal" style="max-width:400px;">
+    <h2 style="font-size:14px;">Manage Contexts — {showContextPicker.title}</h2>
+    {#if contextSnippets.length === 0}
+      <p style="font-size:12px;color:var(--text-secondary);">No contexts created yet. Go to Settings → Contexts to create one.</p>
+    {:else}
+      <div class="ctx-picker-list">
+        {#each contextSnippets as ctx}
+          <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+          <div class="ctx-picker-item" onclick={() => {
+            const p = showContextPicker;
+            const attached = p.contexts || [];
+            const projectPath = p.worktreePath || p.projectPath;
+            if (attached.includes(ctx.name)) {
+              const updated = attached.filter(c => c !== ctx.name);
+              attachContextsToSession(p.id, projectPath, updated);
+              p.contexts = updated;
+            } else {
+              const updated = [...attached, ctx.name];
+              attachContextsToSession(p.id, projectPath, updated);
+              p.contexts = updated;
+            }
+            showContextPicker = {...showContextPicker};
+          }}>
+            <span class="ctx-picker-check">
+              {#if (showContextPicker.contexts || []).includes(ctx.name)}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="var(--accent)"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>
+              {:else}
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="var(--text-secondary)" stroke-width="1.5"><rect x="2" y="2" width="12" height="12" rx="2"/></svg>
+              {/if}
+            </span>
+            <div class="ctx-picker-info">
+              <span class="ctx-picker-name">{ctx.name}</span>
+              <span class="ctx-picker-preview">{ctx.preview}</span>
+            </div>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    <div class="modal-actions">
+      <button onclick={() => showContextPicker = false}>Done</button>
     </div>
   </div>
 </div>
@@ -1792,7 +2454,6 @@ Anti-patterns to avoid:
   .profile-meta { display: flex; align-items: center; justify-content: space-between; }
   .badge { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 10px; }
   .wt-badge { font-size: 8px; font-weight: 700; padding: 1px 4px; border-radius: 3px; background: rgba(210, 168, 255, 0.2); color: #d2a8ff; letter-spacing: 0.5px; }
-  .git-badge { font-size: 8px; font-weight: 600; padding: 1px 4px; border-radius: 3px; background: rgba(63, 185, 80, 0.2); color: #3fb950; }
 
   .profile-item { padding-right: 28px; }
   .ellipsis-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); opacity: 0; padding: 4px; border-radius: 4px; color: var(--text-secondary); cursor: pointer; transition: opacity 0.15s, background 0.15s; z-index: 2; }
@@ -1804,10 +2465,10 @@ Anti-patterns to avoid:
   .session-menu-item:hover { background: rgba(255,255,255,0.06); }
   .session-menu-item.danger:hover { background: rgba(248,81,73,0.12); color: #f85149; }
   .time { font-size: 11px; color: var(--text-secondary); }
-  .bottom-bar { display: flex; align-items: center; padding: 3px 16px; background: var(--sidebar-bg); border-top: 1px solid var(--border); flex-shrink: 0; }
-  .bottom-left { width: 120px; flex-shrink: 0; }
-  .bottom-center { flex: 1; display: flex; align-items: center; justify-content: center; gap: 12px; }
-  .bottom-right { width: 120px; flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; }
+  .bottom-bar { display: flex; align-items: center; padding: 3px 16px; background: var(--sidebar-bg); border-top: 1px solid var(--border); flex-shrink: 0; position: relative; }
+  .bottom-left { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .bottom-center { position: absolute; left: 50%; transform: translateX(-50%); display: flex; align-items: center; justify-content: center; gap: 12px; }
+  .bottom-right { flex-shrink: 0; display: flex; align-items: center; justify-content: flex-end; margin-left: auto; }
   .bottom-version { font-size: 9px; color: var(--text-secondary); font-family: monospace; opacity: 0.4; }
   .update-hint { display: flex; align-items: center; gap: 4px; border: none; background: none; color: var(--accent); font-size: 10px; font-family: inherit; cursor: pointer; padding: 0; transition: opacity 0.15s; }
   .update-hint:hover { opacity: 0.7; }
@@ -1894,7 +2555,7 @@ Anti-patterns to avoid:
   .plugin-browse-btn { padding: 6px 16px; border-radius: 6px; border: 1px solid var(--accent); background: transparent; color: var(--accent); font-size: 12px; font-family: inherit; cursor: pointer; transition: all 0.15s; margin-top: 4px; }
   .plugin-browse-btn:hover { background: var(--accent); color: #fff; }
   .plugin-search.full { width: 100%; }
-  .plugins-list.marketplace { max-height: none; overflow-y: auto; }
+  .plugins-list.marketplace { max-height: 260px; overflow-y: auto; }
 
   .update-notif { position: fixed; bottom: 40px; right: 16px; width: 320px; background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); padding: 14px; z-index: 900; animation: unSlideUp 0.25s cubic-bezier(0.4, 0, 0.2, 1); display: flex; flex-direction: column; gap: 12px; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
   @keyframes unSlideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
@@ -1929,6 +2590,76 @@ Anti-patterns to avoid:
   .about-coffee:hover { background: rgba(245,166,35,0.12); border-color: rgba(245,166,35,0.5); }
   .about-coffee svg { width: 18px; height: 18px; stroke: #f5a623; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
+
+  .git-status-bar { display: flex; align-items: center; gap: 5px; padding: 2px 8px; border-radius: 4px; cursor: pointer; transition: background 0.1s; }
+  .git-status-bar:hover { background: rgba(255,255,255,0.06); }
+  .git-status-bar > svg { color: var(--text-secondary); flex-shrink: 0; }
+  .git-bar-branch { font-size: 10px; color: var(--text-secondary); font-family: monospace; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-bar-ahead { font-size: 9px; font-weight: 600; color: #3fb950; }
+  .git-bar-behind { font-size: 9px; font-weight: 600; color: #d29922; }
+  .git-bar-changes { font-size: 9px; font-weight: 700; color: #fff; background: var(--accent); padding: 0 5px; border-radius: 8px; min-width: 16px; text-align: center; line-height: 16px; }
+  .git-bar-msg { font-size: 9px; color: var(--text-secondary); font-style: italic; animation: gitMsgIn 0.2s ease; }
+  @keyframes gitMsgIn { from { opacity: 0; } to { opacity: 1; } }
+  .git-action-btn { border: none; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 3px 5px; border-radius: 4px; display: flex; align-items: center; gap: 3px; font-size: 10px; font-family: inherit; transition: all 0.1s; }
+  .git-action-btn:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+  .git-action-btn:disabled { opacity: 0.4; cursor: wait; }
+  .git-action-btn.has-tooltip { position: relative; }
+  .btn-tooltip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #1c2128; border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 10px; color: var(--text-primary); white-space: nowrap; z-index: 600; pointer-events: none; }
+  .git-action-btn.has-tooltip:hover .btn-tooltip { display: block; }
+
+  .git-status-wrap { position: relative; flex-shrink: 0; }
+  .git-popup { position: absolute; bottom: calc(100% + 8px); left: 0; width: 420px; max-height: 400px; background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); z-index: 500; display: flex; flex-direction: column; overflow: visible; animation: gitPopupIn 0.15s ease; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+  @keyframes gitPopupIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+  .git-popup-tabs { display: flex; align-items: center; border-bottom: 1px solid var(--border); padding: 0 4px; overflow: visible; position: relative; z-index: 1; }
+  .git-popup-tab { padding: 8px 10px; border: none; background: transparent; color: var(--text-secondary); font-size: 11px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.1s; font-family: inherit; }
+  .git-popup-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .git-popup-tab:hover { color: var(--text-primary); }
+  .git-popup-tab-actions { margin-left: auto; display: flex; gap: 1px; padding-right: 4px; overflow: visible; }
+
+  .git-diff-header { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: rgba(255,255,255,0.02); }
+  .git-diff-back { border: none; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 3px; display: flex; }
+  .git-diff-back:hover { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+  .git-diff-filename { font-size: 11px; font-family: monospace; color: var(--text-primary); }
+  .git-diff-view { max-height: 280px; overflow: auto; padding: 4px 0; font-family: monospace; font-size: 11px; line-height: 1.5; }
+  .git-diff-line { padding: 0 12px; white-space: pre; }
+  .git-diff-line.diff-add { background: rgba(63,185,80,0.12); color: #3fb950; }
+  .git-diff-line.diff-del { background: rgba(248,81,73,0.12); color: #f85149; }
+  .git-diff-line.diff-hunk { color: var(--accent); font-weight: 600; }
+
+  .git-file-stage { cursor: pointer; display: flex; align-items: center; flex-shrink: 0; padding: 1px; border-radius: 3px; }
+  .git-file-stage:hover { background: rgba(255,255,255,0.08); }
+
+  .git-empty { padding: 24px; text-align: center; font-size: 11px; color: var(--text-secondary); }
+
+  .git-history-list { max-height: 300px; overflow-y: auto; }
+  .git-commit-item { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 11px; border-bottom: 1px solid rgba(255,255,255,0.03); }
+  .git-commit-item:hover { background: rgba(255,255,255,0.03); }
+  .git-commit-hash { font-family: monospace; color: var(--accent); font-weight: 600; flex-shrink: 0; font-size: 10px; }
+  .git-commit-message { color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-date { color: var(--text-secondary); flex-shrink: 0; font-size: 10px; }
+
+  .git-branch-list { max-height: 300px; overflow-y: auto; }
+  .git-branch-item { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 12px; cursor: pointer; transition: background 0.1s; }
+  .git-branch-item:hover { background: rgba(255,255,255,0.04); }
+  .git-branch-item.current { color: var(--accent); cursor: default; }
+  .git-branch-item:not(.current) { color: var(--text-secondary); }
+  .git-branch-name-item { font-family: monospace; font-size: 11px; }
+  .git-file-list { max-height: 250px; overflow-y: auto; padding: 4px 0; }
+  .git-file-item { display: flex; align-items: center; gap: 8px; padding: 3px 14px; font-size: 11px; }
+  .git-file-item:hover { background: rgba(255,255,255,0.03); }
+  .git-file-status { width: 16px; font-size: 10px; font-weight: 700; font-family: monospace; text-align: center; flex-shrink: 0; }
+  .git-file-status.modified { color: #d29922; }
+  .git-file-status.added { color: #3fb950; }
+  .git-file-status.deleted { color: #f85149; }
+  .git-file-status.renamed { color: #58a6ff; }
+  .git-file-path { color: var(--text-secondary); font-family: monospace; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .git-commit-row { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); flex-shrink: 0; }
+  .git-commit-input { flex: 1; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-primary); font-size: 11px; font-family: inherit; }
+  .git-commit-input:focus { border-color: var(--accent); outline: none; }
+  .git-commit-input::placeholder { color: var(--text-secondary); }
+  .git-commit-btn { padding: 5px 12px; border-radius: 4px; border: none; background: var(--accent); color: #fff; font-size: 11px; font-weight: 600; font-family: inherit; cursor: pointer; transition: opacity 0.1s; flex-shrink: 0; }
+  .git-commit-btn:hover:not(:disabled) { opacity: 0.85; }
+  .git-commit-btn:disabled { opacity: 0.4; cursor: default; }
 
   .terminal-wrapper { flex: 1; min-width: 0; display: flex; height: 100%; overflow: hidden; }
   .terminal-area { flex: 1; min-width: 0; height: 100%; background: var(--term-bg); position: relative; overflow: hidden; -webkit-app-region: no-drag; }
@@ -1967,14 +2698,28 @@ Anti-patterns to avoid:
   .row input { flex: 1; margin-top: 0; }
   .row button { background: var(--btn-bg, #21262d); border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; color: var(--text-primary); font-size: 13px; cursor: pointer; white-space: nowrap; }
   .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-  .chip { padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; font-family: inherit; transition: all 0.15s; }
-  .chip:hover { border-color: var(--text-secondary); }
-  .chip:focus { outline: none; }
-  .chip.selected { font-weight: 600; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group-label { font-size: 13px; color: var(--text-primary); }
+  .chip { padding: 5px 12px; border-radius: 14px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 12px; cursor: pointer; font-family: inherit; transition: background 0.15s, color 0.15s; user-select: none; display: inline-block; }
+  .chip:hover:not(.selected):not(.disabled) { background: rgba(255,255,255,0.06); }
+  .chip.disabled { opacity: 0.3; cursor: not-allowed; }
+  .chip.selected { font-weight: 600; border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
   .session-select { width: 100%; margin-top: 6px; padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--btn-bg, #21262d); color: var(--text-primary); font-size: 12px; font-family: inherit; appearance: none; cursor: pointer; }
   .session-select option { background: #1c2128; color: var(--text-primary); }
   .custom-prompt { width: 100%; margin-top: 6px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--btn-bg, #21262d); color: var(--text-primary); font-size: 12px; font-family: inherit; resize: vertical; min-height: 60px; line-height: 1.5; }
   .custom-prompt::placeholder { color: var(--text-secondary); }
+  .advanced-section { padding: 4px 0 0; display: flex; flex-direction: column; gap: 8px; animation: advIn 0.12s ease; }
+  @keyframes advIn { from { opacity: 0; } to { opacity: 1; } }
+  .advanced-row { display: flex; gap: 8px; }
+  .advanced-row > label { flex: 1; }
+  .advanced-label { font-size: 11px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
+  .advanced-input { padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text-primary); font-size: 12px; font-family: inherit; }
+  .advanced-input:focus { border-color: var(--accent); outline: none; }
+  .advanced-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
+  .required { color: #f85149; font-weight: 600; }
+  .session-found-hint { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border-radius: 6px; background: color-mix(in srgb, var(--accent) 8%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 20%, transparent); margin: 8px 0; }
+  .session-found-hint svg { flex-shrink: 0; margin-top: 1px; }
+  .session-found-hint span { font-size: 11px; color: var(--text-secondary); line-height: 1.4; }
   .toggle-row { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
   .toggle-label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
   .toggle-tooltip { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); font-size: 10px; color: var(--text-secondary); cursor: default; position: relative; }
@@ -2003,4 +2748,94 @@ Anti-patterns to avoid:
   .color-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: transform 0.15s; }
   .color-dot:hover { transform: scale(1.15); }
 
+  /* ─── Usage Dashboard ─── */
+  .dash-modal { width: 900px; max-height: 85vh; background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 48px rgba(0,0,0,0.5); overflow: hidden; animation: modalUp 0.18s ease; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); display: flex; flex-direction: column; }
+  .dash-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .dash-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+  .dash-header-right { display: flex; align-items: center; gap: 10px; }
+  .dash-period { padding: 4px 8px; border-radius: 5px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 11px; font-family: inherit; cursor: pointer; }
+  .dash-loading { padding: 60px; text-align: center; font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  .dash-spinner { width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .dash-body { padding: 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
+
+  .dash-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; flex: 1; }
+  .dash-stat { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px 6px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); }
+  .dash-stat-value { font-size: 18px; font-weight: 700; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .dash-stat-label { font-size: 9px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.3px; margin-top: 3px; }
+
+  .dash-section { flex: 1; min-width: 0; }
+  .dash-section-label { font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+
+  .dash-chart { display: flex; align-items: flex-end; gap: 3px; height: 80px; padding: 4px 0; }
+  .dash-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%; justify-content: flex-end; cursor: default; }
+  .dash-bar { width: 100%; border-radius: 2px 2px 0 0; min-height: 2px; transition: height 0.3s ease; opacity: 0.8; background: var(--accent); }
+  .dash-bar-wrap:hover .dash-bar { opacity: 1; }
+  .dash-bar-label { font-size: 8px; color: var(--text-secondary); margin-top: 3px; opacity: 0.6; }
+
+  .dash-tokens-bar { display: flex; gap: 16px; justify-content: center; padding: 8px 12px; border-radius: 6px; background: rgba(255,255,255,0.02); font-size: 10px; color: var(--text-secondary); }
+  .dash-tokens-bar strong { color: var(--text-primary); font-weight: 500; }
+
+  .dash-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .dash-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .dash-scroll { max-height: 160px; overflow-y: auto; }
+
+  .dash-model-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 5px; }
+  .dash-model-row:hover { background: rgba(255,255,255,0.03); }
+  .dash-model-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .dash-model-name { font-size: 12px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-model-meta { font-size: 10px; color: var(--text-secondary); }
+  .dash-model-cost { font-size: 12px; font-weight: 600; color: var(--accent); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+  .dash-tool-row { display: flex; align-items: center; gap: 8px; padding: 4px 8px; font-size: 11px; }
+  .dash-tool-name { width: 70px; flex-shrink: 0; color: var(--text-primary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash-tool-bar-bg { flex: 1; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; }
+  .dash-tool-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; opacity: 0.7; }
+  .dash-tool-count { width: 40px; text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+
+  .dash-plan-badge { font-size: 10px; font-weight: 600; text-transform: capitalize; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
+  .dash-live-bar { flex: 1; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
+  .dash-live-row { display: flex; align-items: center; gap: 8px; }
+  .dash-live-lbl { font-size: 11px; color: var(--text-secondary); width: 50px; flex-shrink: 0; }
+  .dash-live-pct { font-size: 12px; font-weight: 600; width: 40px; text-align: right; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .dash-refresh-select { padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-secondary); font-size: 11px; font-family: inherit; cursor: pointer; }
+  .dash-edit-key { border: none; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 3px 6px; border-radius: 3px; display: flex; align-items: center; gap: 4px; margin-left: auto; font-size: 9px; font-family: inherit; opacity: 0.6; transition: all 0.1s; }
+  .dash-edit-key:hover { opacity: 1; background: rgba(255,255,255,0.06); color: var(--text-primary); }
+  /* ─── Context Manager ─── */
+  .ctx-editor { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,0.02); margin-bottom: 10px; }
+  .ctx-name-input { padding: 6px 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-primary); font-size: 12px; font-family: inherit; font-weight: 600; }
+  .ctx-name-input:focus { border-color: var(--accent); outline: none; }
+  .ctx-content-input { padding: 8px; border-radius: 4px; border: 1px solid var(--border); background: transparent; color: var(--text-primary); font-size: 11px; font-family: inherit; resize: vertical; min-height: 80px; line-height: 1.5; }
+  .ctx-content-input:focus { border-color: var(--accent); outline: none; }
+  .ctx-content-input::placeholder { color: var(--text-secondary); }
+  .ctx-list { display: flex; flex-direction: column; gap: 4px; }
+  .ctx-card { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: rgba(255,255,255,0.02); }
+  .ctx-card:hover { background: rgba(255,255,255,0.04); }
+  .ctx-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .ctx-card-name { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+  .ctx-card-preview { font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctx-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .ctx-action-btn { border: none; background: transparent; color: var(--text-secondary); cursor: pointer; padding: 4px; border-radius: 4px; display: flex; transition: all 0.1s; }
+  .ctx-action-btn:hover { background: rgba(255,255,255,0.08); color: var(--text-primary); }
+  .ctx-action-btn.danger:hover { background: rgba(248,81,73,0.12); color: #f85149; }
+  .ctx-attached-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .ctx-attached-chip { display: flex; align-items: center; gap: 4px; padding: 3px 6px 3px 10px; border-radius: 12px; background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); color: var(--accent); font-size: 11px; font-weight: 500; }
+  .ctx-chip-remove { cursor: pointer; font-size: 14px; line-height: 1; opacity: 0.6; transition: opacity 0.1s; display: flex; align-items: center; }
+  .ctx-chip-remove:hover { opacity: 1; }
+  .ctx-add-wrap { position: relative; }
+  .ctx-add-btn { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 4px; border: 1px dashed var(--border); background: transparent; color: var(--text-secondary); font-size: 11px; font-family: inherit; cursor: pointer; transition: all 0.1s; }
+  .ctx-add-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .ctx-dropdown { position: absolute; top: calc(100% + 4px); left: 0; width: 250px; background: var(--sidebar-bg); border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.4); z-index: 100; max-height: 180px; overflow-y: auto; padding: 4px; }
+  .ctx-dropdown-item { padding: 6px 10px; border-radius: 4px; cursor: pointer; transition: background 0.1s; }
+  .ctx-dropdown-item:hover { background: rgba(255,255,255,0.06); }
+  .ctx-dropdown-name { font-size: 12px; font-weight: 500; color: var(--text-primary); display: block; }
+  .ctx-dropdown-preview { font-size: 10px; color: var(--text-secondary); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctx-dropdown-empty { padding: 10px; text-align: center; font-size: 11px; color: var(--text-secondary); }
+  .ctx-picker-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow-y: auto; }
+  .ctx-picker-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 5px; cursor: pointer; transition: background 0.1s; }
+  .ctx-picker-item:hover { background: rgba(255,255,255,0.04); }
+  .ctx-picker-check { flex-shrink: 0; display: flex; }
+  .ctx-picker-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+  .ctx-picker-name { font-size: 12px; font-weight: 500; color: var(--text-primary); }
+  .ctx-picker-preview { font-size: 10px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 </style>

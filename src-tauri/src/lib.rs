@@ -38,6 +38,8 @@ pub struct SessionProfile {
     pub git_name: Option<String>,
     #[serde(default)]
     pub git_email: Option<String>,
+    #[serde(default)]
+    pub contexts: Vec<String>, // attached context snippet names
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -271,7 +273,7 @@ fn get_profiles() -> Result<Vec<SessionProfile>, String> {
 }
 
 #[tauri::command]
-fn create_profile(title: String, purpose: String, project_path: String, skip_permissions: Option<bool>, custom_prompt: Option<String>, git_name: Option<String>, git_email: Option<String>) -> Result<SessionProfile, String> {
+fn create_profile(title: String, purpose: String, project_path: String, skip_permissions: Option<bool>, custom_prompt: Option<String>, git_name: Option<String>, git_email: Option<String>, contexts: Option<Vec<String>>) -> Result<SessionProfile, String> {
     let mut profiles = load_profiles();
     let now = now_iso8601();
 
@@ -292,6 +294,7 @@ fn create_profile(title: String, purpose: String, project_path: String, skip_per
         skip_permissions: skip_permissions.unwrap_or(false),
         git_name,
         git_email,
+        contexts: contexts.unwrap_or_default(),
     };
 
     profiles.push(profile.clone());
@@ -386,6 +389,523 @@ fn get_git_branch(project_path: String) -> Result<String, String> {
         .output()
         .map_err(|e| format!("git branch failed: {}", e))?;
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Get ahead/behind count relative to upstream
+#[tauri::command]
+fn get_git_ahead_behind(project_path: String) -> Result<(u32, u32), String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "rev-list", "--left-right", "--count", "HEAD...@{upstream}"])
+        .output()
+        .map_err(|e| format!("git rev-list failed: {}", e))?;
+    if !output.status.success() {
+        return Ok((0, 0)); // No upstream set
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let parts: Vec<&str> = stdout.split_whitespace().collect();
+    let ahead = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let behind = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
+    Ok((ahead, behind))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageAnalytics {
+    pub total_cost: f64,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_cache_write_tokens: u64,
+    pub total_sessions: u32,
+    pub total_api_calls: u32,
+    pub cache_hit_percent: f64,
+    pub daily: Vec<DailyUsage>,
+    pub by_model: Vec<ModelUsage>,
+    pub by_project: Vec<ProjectUsage>,
+    pub top_sessions: Vec<SessionCost>,
+    pub tools: Vec<ToolCount>,
+    pub shell_commands: Vec<ToolCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyUsage {
+    pub date: String,
+    pub cost: f64,
+    pub calls: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    pub model: String,
+    pub cost: f64,
+    pub calls: u32,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_hit_percent: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectUsage {
+    pub project: String,
+    pub cost: f64,
+    pub sessions: u32,
+    pub calls: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCost {
+    pub session_id: String,
+    pub project: String,
+    pub cost: f64,
+    pub calls: u32,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCount {
+    pub name: String,
+    pub count: u32,
+}
+
+#[tauri::command]
+async fn get_usage_analytics(days: Option<u32>) -> Result<UsageAnalytics, String> {
+    tauri::async_runtime::spawn_blocking(move || get_usage_analytics_sync(days))
+        .await
+        .map_err(|e| format!("Thread error: {}", e))?
+}
+
+fn get_usage_analytics_sync(days: Option<u32>) -> Result<UsageAnalytics, String> {
+    let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
+    let projects_dir = home.join(".claude").join("projects");
+
+    if !projects_dir.exists() {
+        return Ok(UsageAnalytics {
+            total_cost: 0.0, total_input_tokens: 0, total_output_tokens: 0,
+            total_cache_read_tokens: 0, total_cache_write_tokens: 0,
+            total_sessions: 0, total_api_calls: 0, cache_hit_percent: 0.0,
+            daily: vec![], by_model: vec![], by_project: vec![],
+            top_sessions: vec![], tools: vec![], shell_commands: vec![],
+        });
+    }
+
+    let days_limit = days.unwrap_or(30);
+    let cutoff = chrono::Utc::now() - chrono::Duration::days(days_limit as i64);
+
+    // Pricing per million tokens (approximate Claude pricing)
+    let price_for_model = |model: &str| -> (f64, f64, f64, f64) {
+        // (input, output, cache_read, cache_write) per million tokens
+        let m = model.to_lowercase();
+        if m.contains("opus") { (15.0, 75.0, 1.5, 18.75) }
+        else if m.contains("haiku") { (0.80, 4.0, 0.08, 1.0) }
+        else { (3.0, 15.0, 0.3, 3.75) } // sonnet default
+    };
+
+    let mut total_input: u64 = 0;
+    let mut total_output: u64 = 0;
+    let mut total_cache_read: u64 = 0;
+    let mut total_cache_write: u64 = 0;
+    let mut total_cost: f64 = 0.0;
+    let mut total_calls: u32 = 0;
+    let mut total_sessions: u32 = 0;
+
+    let mut daily_map: std::collections::HashMap<String, (f64, u32, u64, u64)> = std::collections::HashMap::new();
+    let mut model_map: std::collections::HashMap<String, (f64, u32, u64, u64, u64, u64)> = std::collections::HashMap::new();
+    let mut project_map: std::collections::HashMap<String, (f64, u32, u32)> = std::collections::HashMap::new();
+    let mut session_costs: Vec<SessionCost> = Vec::new();
+    let mut tool_map: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut shell_map: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+
+    // Iterate all project directories
+    for project_entry in std::fs::read_dir(&projects_dir).map_err(|e| e.to_string())?.flatten() {
+        let project_name = project_entry.file_name().to_string_lossy().to_string();
+        let project_dir = project_entry.path();
+        if !project_dir.is_dir() { continue; }
+
+        let mut project_cost: f64 = 0.0;
+        let mut project_sessions: u32 = 0;
+        let mut project_calls: u32 = 0;
+
+        // Iterate session files
+        for session_entry in std::fs::read_dir(&project_dir).map_err(|e| e.to_string())?.flatten() {
+            let path = session_entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") { continue; }
+
+            // Check modification time
+            if let Ok(metadata) = path.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    let modified_time: chrono::DateTime<chrono::Utc> = modified.into();
+                    if modified_time < cutoff { continue; }
+                }
+            }
+
+            let session_id = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let mut session_cost: f64 = 0.0;
+            let mut session_calls: u32 = 0;
+            let mut session_model = String::new();
+            total_sessions += 1;
+            project_sessions += 1;
+
+            for line in content.lines() {
+                if line.trim().is_empty() { continue; }
+                let val: serde_json::Value = match serde_json::from_str(line) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+
+                // Extract model and usage from assistant messages
+                let msg_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if msg_type != "assistant" { continue; }
+
+                let message = match val.get("message") {
+                    Some(m) => m,
+                    None => continue,
+                };
+
+                let model = message.get("model").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                if session_model.is_empty() { session_model = model.clone(); }
+
+                let usage = match message.get("usage") {
+                    Some(u) => u,
+                    None => continue,
+                };
+
+                let input = usage.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let output = usage.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cache_read = usage.get("cache_read_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                let cache_write = usage.get("cache_creation_input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
+
+                let (pi, po, pcr, pcw) = price_for_model(&model);
+                let call_cost = (input as f64 * pi + output as f64 * po + cache_read as f64 * pcr + cache_write as f64 * pcw) / 1_000_000.0;
+
+                total_input += input;
+                total_output += output;
+                total_cache_read += cache_read;
+                total_cache_write += cache_write;
+                total_cost += call_cost;
+                total_calls += 1;
+                session_cost += call_cost;
+                session_calls += 1;
+                project_cost += call_cost;
+                project_calls += 1;
+
+                // Daily
+                // Try to get timestamp from the entry
+                let date_str = val.get("timestamp").and_then(|v| v.as_str())
+                    .map(|t| t[..10].to_string())
+                    .unwrap_or_else(|| chrono::Utc::now().format("%Y-%m-%d").to_string());
+                let daily = daily_map.entry(date_str).or_insert((0.0, 0, 0, 0));
+                daily.0 += call_cost;
+                daily.1 += 1;
+                daily.2 += input;
+                daily.3 += output;
+
+                // Model
+                let short_model = if model.contains("opus") { "Opus".to_string() }
+                    else if model.contains("haiku") { "Haiku".to_string() }
+                    else if model.contains("sonnet") { "Sonnet".to_string() }
+                    else { model.clone() };
+                let me = model_map.entry(short_model).or_insert((0.0, 0, 0, 0, 0, 0));
+                me.0 += call_cost;
+                me.1 += 1;
+                me.2 += input;
+                me.3 += output;
+                me.4 += cache_read;
+                me.5 += cache_write;
+
+                // Tools
+                if let Some(content_arr) = message.get("content").and_then(|v| v.as_array()) {
+                    for block in content_arr {
+                        if block.get("type").and_then(|v| v.as_str()) == Some("tool_use") {
+                            let tool_name = block.get("name").and_then(|v| v.as_str()).unwrap_or("unknown").to_string();
+                            *tool_map.entry(tool_name.clone()).or_insert(0) += 1;
+
+                            // Extract shell commands from Bash tool
+                            if tool_name == "Bash" || tool_name == "bash" {
+                                if let Some(input_obj) = block.get("input") {
+                                    if let Some(cmd) = input_obj.get("command").and_then(|v| v.as_str()) {
+                                        let shell_cmd = cmd.split_whitespace().next().unwrap_or("").to_string();
+                                        if !shell_cmd.is_empty() {
+                                            *shell_map.entry(shell_cmd).or_insert(0) += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if session_calls > 0 {
+                session_costs.push(SessionCost {
+                    session_id,
+                    project: project_name.clone(),
+                    cost: session_cost,
+                    calls: session_calls,
+                    model: session_model,
+                });
+            }
+        }
+
+        if project_sessions > 0 {
+            project_map.insert(project_name, (project_cost, project_sessions, project_calls));
+        }
+    }
+
+    // Sort and format results
+    let mut daily: Vec<DailyUsage> = daily_map.into_iter().map(|(date, (cost, calls, input, output))| {
+        DailyUsage { date, cost, calls, input_tokens: input, output_tokens: output }
+    }).collect();
+    daily.sort_by(|a, b| a.date.cmp(&b.date));
+
+    let mut by_model: Vec<ModelUsage> = model_map.into_iter().map(|(model, (cost, calls, input, output, cr, cw))| {
+        let total_input_for_model = input + cr + cw;
+        let cache_pct = if total_input_for_model > 0 { (cr as f64 / total_input_for_model as f64) * 100.0 } else { 0.0 };
+        ModelUsage { model, cost, calls, input_tokens: input, output_tokens: output, cache_hit_percent: cache_pct }
+    }).collect();
+    by_model.sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut by_project: Vec<ProjectUsage> = project_map.into_iter().map(|(project, (cost, sessions, calls))| {
+        ProjectUsage { project, cost, sessions, calls }
+    }).collect();
+    by_project.sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
+
+    session_costs.sort_by(|a, b| b.cost.partial_cmp(&a.cost).unwrap_or(std::cmp::Ordering::Equal));
+    let top_sessions = session_costs.into_iter().take(5).collect();
+
+    let mut tools: Vec<ToolCount> = tool_map.into_iter().map(|(name, count)| ToolCount { name, count }).collect();
+    tools.sort_by(|a, b| b.count.cmp(&a.count));
+
+    let mut shell_commands: Vec<ToolCount> = shell_map.into_iter().map(|(name, count)| ToolCount { name, count }).collect();
+    shell_commands.sort_by(|a, b| b.count.cmp(&a.count));
+    shell_commands.truncate(15);
+
+    let total_all_input = total_input + total_cache_read + total_cache_write;
+    let cache_hit_percent = if total_all_input > 0 { (total_cache_read as f64 / total_all_input as f64) * 100.0 } else { 0.0 };
+
+    Ok(UsageAnalytics {
+        total_cost,
+        total_input_tokens: total_input,
+        total_output_tokens: total_output,
+        total_cache_read_tokens: total_cache_read,
+        total_cache_write_tokens: total_cache_write,
+        total_sessions,
+        total_api_calls: total_calls,
+        cache_hit_percent,
+        daily,
+        by_model,
+        by_project,
+        top_sessions,
+        tools,
+        shell_commands,
+    })
+}
+
+/// Stage all changes and commit
+#[tauri::command]
+fn git_commit(project_path: String, message: String) -> Result<String, String> {
+    // Stage all changes
+    let add = std::process::Command::new("git")
+        .args(["-C", &project_path, "add", "-A"])
+        .output()
+        .map_err(|e| format!("git add failed: {}", e))?;
+    if !add.status.success() {
+        return Err(format!("git add failed: {}", String::from_utf8_lossy(&add.stderr)));
+    }
+    // Commit
+    let commit = std::process::Command::new("git")
+        .args(["-C", &project_path, "commit", "-m", &message])
+        .output()
+        .map_err(|e| format!("git commit failed: {}", e))?;
+    if !commit.status.success() {
+        let stderr = String::from_utf8_lossy(&commit.stderr).trim().to_string();
+        if stderr.contains("nothing to commit") {
+            return Ok("Nothing to commit".to_string());
+        }
+        return Err(format!("git commit failed: {}", stderr));
+    }
+    Ok(String::from_utf8_lossy(&commit.stdout).trim().to_string())
+}
+
+/// Push current branch to origin
+#[tauri::command]
+fn git_push(project_path: String) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "push"])
+        .output()
+        .map_err(|e| format!("git push failed: {}", e))?;
+    if !output.status.success() {
+        // Try push with upstream set
+        let output2 = std::process::Command::new("git")
+            .args(["-C", &project_path, "push", "--set-upstream", "origin", "HEAD"])
+            .output()
+            .map_err(|e| format!("git push failed: {}", e))?;
+        if !output2.status.success() {
+            return Err(format!("git push failed: {}", String::from_utf8_lossy(&output2.stderr)));
+        }
+        return Ok(String::from_utf8_lossy(&output2.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stderr).trim().to_string())
+}
+
+/// Pull from origin
+#[tauri::command]
+fn git_pull(project_path: String) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "pull"])
+        .output()
+        .map_err(|e| format!("git pull failed: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("git pull failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Get diff for a specific file
+#[tauri::command]
+fn git_diff_file(project_path: String, file_path: String) -> Result<String, String> {
+    // Try staged diff first, then unstaged
+    let staged = std::process::Command::new("git")
+        .args(["-C", &project_path, "diff", "--cached", "--", &file_path])
+        .output()
+        .map_err(|e| format!("git diff failed: {}", e))?;
+    let staged_out = String::from_utf8_lossy(&staged.stdout).to_string();
+
+    let unstaged = std::process::Command::new("git")
+        .args(["-C", &project_path, "diff", "--", &file_path])
+        .output()
+        .map_err(|e| format!("git diff failed: {}", e))?;
+    let unstaged_out = String::from_utf8_lossy(&unstaged.stdout).to_string();
+
+    // For untracked files, show the full content
+    if staged_out.is_empty() && unstaged_out.is_empty() {
+        let full_path = std::path::PathBuf::from(&project_path).join(&file_path);
+        if full_path.exists() {
+            let content = std::fs::read_to_string(&full_path).unwrap_or_default();
+            return Ok(format!("New file: {}\n\n{}", file_path, content));
+        }
+    }
+
+    if !staged_out.is_empty() { Ok(staged_out) } else { Ok(unstaged_out) }
+}
+
+/// Stage a specific file
+#[tauri::command]
+fn git_stage_file(project_path: String, file_path: String) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "add", "--", &file_path])
+        .output()
+        .map_err(|e| format!("git add failed: {}", e))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Unstage a specific file
+#[tauri::command]
+fn git_unstage_file(project_path: String, file_path: String) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "restore", "--staged", "--", &file_path])
+        .output()
+        .map_err(|e| format!("git restore failed: {}", e))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// Get recent commit log
+#[tauri::command]
+fn git_log(project_path: String, limit: Option<u32>) -> Result<Vec<serde_json::Value>, String> {
+    let n = limit.unwrap_or(10).to_string();
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "log", &format!("-{}", n), "--pretty=format:%H|||%h|||%s|||%an|||%ar"])
+        .output()
+        .map_err(|e| format!("git log failed: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let commits: Vec<serde_json::Value> = stdout.lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let parts: Vec<&str> = line.splitn(5, "|||").collect();
+            serde_json::json!({
+                "hash": parts.get(0).unwrap_or(&""),
+                "short": parts.get(1).unwrap_or(&""),
+                "message": parts.get(2).unwrap_or(&""),
+                "author": parts.get(3).unwrap_or(&""),
+                "date": parts.get(4).unwrap_or(&""),
+            })
+        })
+        .collect();
+    Ok(commits)
+}
+
+/// Stash changes
+#[tauri::command]
+fn git_stash(project_path: String) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "stash"])
+        .output()
+        .map_err(|e| format!("git stash failed: {}", e))?;
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Pop stash
+#[tauri::command]
+fn git_stash_pop(project_path: String) -> Result<String, String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "stash", "pop"])
+        .output()
+        .map_err(|e| format!("git stash pop failed: {}", e))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// List local branches
+#[tauri::command]
+fn git_list_branches(project_path: String) -> Result<Vec<serde_json::Value>, String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "branch", "--format=%(refname:short)|||%(HEAD)"])
+        .output()
+        .map_err(|e| format!("git branch failed: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let branches: Vec<serde_json::Value> = stdout.lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let parts: Vec<&str> = line.splitn(2, "|||").collect();
+            serde_json::json!({
+                "name": parts.get(0).unwrap_or(&"").trim(),
+                "current": parts.get(1).unwrap_or(&"").trim() == "*",
+            })
+        })
+        .collect();
+    Ok(branches)
+}
+
+/// Switch to a branch
+#[tauri::command]
+fn git_switch_branch(project_path: String, branch_name: String) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(["-C", &project_path, "checkout", &branch_name])
+        .output()
+        .map_err(|e| format!("git checkout failed: {}", e))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    Ok(())
 }
 
 /// Check if a path is inside a git repo
@@ -1225,6 +1745,145 @@ fn uninstall_plugin(name: String, marketplace: String) -> Result<(), String> {
     Ok(())
 }
 
+/// Get storage dir for context snippets
+fn get_contexts_dir() -> PathBuf {
+    let dir = get_storage_dir().join("contexts");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// List all saved context snippets
+#[tauri::command]
+fn get_context_snippets() -> Result<Vec<serde_json::Value>, String> {
+    let dir = get_contexts_dir();
+    let mut snippets = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+                let content = std::fs::read_to_string(&path).unwrap_or_default();
+                let preview = content.lines().next().unwrap_or("").chars().take(80).collect::<String>();
+                snippets.push(serde_json::json!({
+                    "name": name,
+                    "content": content,
+                    "preview": preview,
+                }));
+            }
+        }
+    }
+    snippets.sort_by(|a, b| a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or("")));
+    Ok(snippets)
+}
+
+/// Save a context snippet
+#[tauri::command]
+fn save_context_snippet(name: String, content: String) -> Result<(), String> {
+    let path = get_contexts_dir().join(format!("{}.md", name));
+    std::fs::write(&path, &content).map_err(|e| e.to_string())
+}
+
+/// Delete a context snippet
+#[tauri::command]
+fn delete_context_snippet(name: String) -> Result<(), String> {
+    let path = get_contexts_dir().join(format!("{}.md", name));
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Inject context snippets into CLAUDE.md for a session
+#[tauri::command]
+fn inject_session_context(project_path: String, context_names: Vec<String>) -> Result<(), String> {
+    let contexts_dir = get_contexts_dir();
+    let mut combined = String::new();
+
+    for name in &context_names {
+        let path = contexts_dir.join(format!("{}.md", name));
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if !combined.is_empty() { combined.push_str("\n\n---\n\n"); }
+            combined.push_str(&format!("## {}\n\n{}", name, content));
+        }
+    }
+
+    let claude_md_path = PathBuf::from(&project_path).join("CLAUDE.md");
+    let marker_start = "<!-- CLAUGE-CONTEXT-START -->";
+    let marker_end = "<!-- CLAUGE-CONTEXT-END -->";
+
+    // Read existing content (without old markers) to check for duplicates
+    let existing_content = if claude_md_path.exists() {
+        let raw = std::fs::read_to_string(&claude_md_path).map_err(|e| e.to_string())?;
+        if let (Some(start), Some(end)) = (raw.find(marker_start), raw.find(marker_end)) {
+            raw[..start].trim_end().to_string()
+        } else {
+            raw
+        }
+    } else {
+        String::new()
+    };
+
+    // Filter out snippets whose content already exists in the file
+    let mut filtered = String::new();
+    for name in &context_names {
+        let path = contexts_dir.join(format!("{}.md", name));
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if !existing_content.contains(content.trim()) {
+                if !filtered.is_empty() { filtered.push_str("\n\n---\n\n"); }
+                filtered.push_str(&format!("## {}\n\n{}", name, content));
+            }
+        }
+    }
+
+    if filtered.is_empty() { return Ok(()); }
+
+    let injected = format!("\n\n{}\n{}\n{}\n", marker_start, filtered, marker_end);
+
+    if !existing_content.is_empty() {
+        std::fs::write(&claude_md_path, format!("{}{}", existing_content.trim_end(), injected)).map_err(|e| e.to_string())?;
+    } else {
+        std::fs::write(&claude_md_path, filtered).map_err(|e| e.to_string())?;
+    }
+
+    Ok(())
+}
+
+/// Remove injected context from CLAUDE.md
+#[tauri::command]
+fn remove_injected_context(project_path: String) -> Result<(), String> {
+    let claude_md_path = PathBuf::from(&project_path).join("CLAUDE.md");
+    if !claude_md_path.exists() { return Ok(()); }
+
+    let content = std::fs::read_to_string(&claude_md_path).map_err(|e| e.to_string())?;
+    let marker_start = "<!-- CLAUGE-CONTEXT-START -->";
+    let marker_end = "<!-- CLAUGE-CONTEXT-END -->";
+
+    if let (Some(start), Some(end)) = (content.find(marker_start), content.find(marker_end)) {
+        let cleaned = format!("{}{}", &content[..start].trim_end(), &content[end + marker_end.len()..]);
+        if cleaned.trim().is_empty() {
+            // We created this file — delete it
+            let _ = std::fs::remove_file(&claude_md_path);
+        } else {
+            std::fs::write(&claude_md_path, cleaned.trim_end().to_string() + "\n").map_err(|e| e.to_string())?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Update contexts attached to a session profile
+#[tauri::command]
+fn update_session_contexts(id: String, contexts: Vec<String>) -> Result<(), String> {
+    let mut profiles = load_profiles();
+    if let Some(profile) = profiles.iter_mut().find(|p| p.id == id) {
+        profile.contexts = contexts;
+    } else {
+        return Err("Profile not found".to_string());
+    }
+    save_profiles(&profiles)?;
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -1251,6 +1910,18 @@ pub fn run() {
             is_git_repo,
             get_git_status,
             get_git_branch,
+            get_git_ahead_behind,
+            git_commit,
+            git_push,
+            git_pull,
+            git_diff_file,
+            git_stage_file,
+            git_unstage_file,
+            git_log,
+            git_stash,
+            git_stash_pop,
+            git_list_branches,
+            git_switch_branch,
             create_worktree,
             remove_worktree,
             update_profile_worktree,
@@ -1258,6 +1929,7 @@ pub fn run() {
             discover_sessions,
             get_session_tokens,
             fetch_usage_limits,
+            get_usage_analytics,
             get_app_version,
             get_claude_plan,
             update_tray_title,
@@ -1272,7 +1944,13 @@ pub fn run() {
             toggle_claude_plugin,
             get_marketplace_plugins,
             install_plugin,
-            uninstall_plugin
+            uninstall_plugin,
+            get_context_snippets,
+            save_context_snippet,
+            delete_context_snippet,
+            inject_session_context,
+            remove_injected_context,
+            update_session_contexts
         ])
         .setup(|app| {
             let setup_start = std::time::Instant::now();
