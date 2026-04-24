@@ -7,8 +7,19 @@
   import type { AppearanceConfig } from '$lib/types';
   import { testAiKey, getAiUsageStats, getAiProviderStats, resetAiUsage } from '$lib/commands/ai';
   import type { AiUsageStat, AiProviderStat } from '$lib/types/ai';
+  import {
+    agentGetPlugins,
+    agentTogglePlugin,
+    agentUninstallPlugin,
+    agentGetMarketplacePlugins,
+    agentInstallPlugin,
+    agentListContexts,
+    agentSaveContext,
+    agentDeleteContext,
+  } from '$lib/commands/agent';
+  import type { ClaudePlugin, MarketplacePlugin, AgentContext } from '$lib/types/agent';
 
-  type SettingsTab = 'general' | 'appearance' | 'ai' | 'proxy' | 'shortcuts' | 'about';
+  type SettingsTab = 'general' | 'appearance' | 'ai' | 'agent' | 'proxy' | 'shortcuts' | 'about';
 
   let show = $state(false);
   let activeTab = $state<SettingsTab>('general');
@@ -111,6 +122,7 @@
     { key: 'general', label: 'General', icon: 'M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z' },
     { key: 'appearance', label: 'Appearance', icon: 'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z' },
     { key: 'ai', label: 'AI Assistance', icon: 'M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z' },
+    { key: 'agent', label: 'Agent', icon: 'M12 2a4 4 0 0 0-4 4v2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10a2 2 0 0 0-2-2h-2V6a4 4 0 0 0-4-4zm0 2a2 2 0 0 1 2 2v2h-4V6a2 2 0 0 1 2-2zm-1 10v2h2v-2h2v-2h-2v-2h-2v2H9v2h2z' },
     { key: 'proxy', label: 'Proxy', icon: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' },
     { key: 'shortcuts', label: 'Shortcuts', icon: 'M18 3a3 3 0 00-3 3v12a3 3 0 003 3 3 3 0 003-3 3 3 0 00-3-3H6a3 3 0 00-3 3 3 3 0 003 3 3 3 0 003-3V6a3 3 0 00-3-3 3 3 0 00-3 3 3 3 0 003 3h12a3 3 0 003-3 3 3 0 00-3-3z' },
     { key: 'about', label: 'About', icon: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z' },
@@ -266,6 +278,140 @@
     }
     if (!show) {
       aiSettingsLoaded = false;
+    }
+  });
+
+  // --- Agent Tab ---
+  type AgentSubTab = 'general' | 'plugins' | 'contexts';
+  let agentSubTab = $state<AgentSubTab>('general');
+
+  // Agent General
+  let agentSessionKey = $derived($settings['agent_session_key'] ?? '');
+  let agentNotifyEnabled = $derived(($settings['agent_notify_enabled'] ?? 'true') === 'true');
+  let agentSoundEnabled = $derived(($settings['agent_sound_enabled'] ?? 'false') === 'true');
+  let agentDockBounceEnabled = $derived(($settings['agent_dock_bounce_enabled'] ?? 'true') === 'true');
+
+  // Agent Plugins
+  type PluginView = 'installed' | 'marketplace';
+  let pluginView = $state<PluginView>('installed');
+  let installedPlugins = $state<ClaudePlugin[]>([]);
+  let marketplacePlugins = $state<MarketplacePlugin[]>([]);
+  let pluginSearchQuery = $state('');
+  let filteredMarketplacePlugins = $derived(
+    pluginSearchQuery.trim()
+      ? marketplacePlugins.filter(p =>
+          p.name.toLowerCase().includes(pluginSearchQuery.toLowerCase()) ||
+          p.description.toLowerCase().includes(pluginSearchQuery.toLowerCase())
+        )
+      : marketplacePlugins
+  );
+
+  // Agent Contexts
+  let agentContexts = $state<AgentContext[]>([]);
+  let editingContext = $state<AgentContext | null>(null);
+  let editContextName = $state('');
+  let editContextContent = $state('');
+  let isNewContext = $state(false);
+  let deleteConfirmId = $state<string | null>(null);
+
+  async function loadAgentPlugins() {
+    try {
+      installedPlugins = await agentGetPlugins();
+    } catch { installedPlugins = []; }
+    try {
+      marketplacePlugins = await agentGetMarketplacePlugins();
+    } catch { marketplacePlugins = []; }
+  }
+
+  async function loadAgentContexts() {
+    try {
+      agentContexts = await agentListContexts();
+    } catch { agentContexts = []; }
+  }
+
+  async function handleTogglePlugin(name: string, enabled: boolean) {
+    try {
+      await agentTogglePlugin(name, enabled);
+      installedPlugins = installedPlugins.map(p => p.name === name ? { ...p, enabled } : p);
+      showToast(`Plugin ${enabled ? 'enabled' : 'disabled'}`, 'success');
+    } catch { showToast('Failed to toggle plugin', 'error'); }
+  }
+
+  async function handleUninstallPlugin(name: string) {
+    try {
+      await agentUninstallPlugin(name);
+      installedPlugins = installedPlugins.filter(p => p.name !== name);
+      marketplacePlugins = marketplacePlugins.map(p => p.name === name ? { ...p, installed: false } : p);
+      showToast('Plugin uninstalled', 'success');
+    } catch { showToast('Failed to uninstall plugin', 'error'); }
+  }
+
+  async function handleInstallPlugin(name: string, marketplace: string) {
+    try {
+      await agentInstallPlugin(name, marketplace);
+      marketplacePlugins = marketplacePlugins.map(p => p.name === name ? { ...p, installed: true } : p);
+      await loadAgentPlugins();
+      showToast('Plugin installed', 'success');
+    } catch { showToast('Failed to install plugin', 'error'); }
+  }
+
+  function startEditContext(ctx: AgentContext) {
+    editingContext = ctx;
+    editContextName = ctx.name;
+    editContextContent = ctx.content;
+    isNewContext = false;
+  }
+
+  function startNewContext() {
+    editingContext = null;
+    editContextName = '';
+    editContextContent = '';
+    isNewContext = true;
+  }
+
+  function cancelEditContext() {
+    editingContext = null;
+    isNewContext = false;
+    editContextName = '';
+    editContextContent = '';
+  }
+
+  async function handleSaveAgentContext() {
+    const name = editContextName.trim();
+    const content = editContextContent.trim();
+    if (!name || !content) {
+      showToast('Name and content are required', 'error');
+      return;
+    }
+    try {
+      await agentSaveContext(name, content);
+      await loadAgentContexts();
+      cancelEditContext();
+      showToast('Context saved', 'success');
+    } catch { showToast('Failed to save context', 'error'); }
+  }
+
+  async function handleDeleteAgentContext(id: string) {
+    try {
+      await agentDeleteContext(id);
+      agentContexts = agentContexts.filter(c => c.id !== id);
+      deleteConfirmId = null;
+      if (editingContext?.id === id) cancelEditContext();
+      showToast('Context deleted', 'success');
+    } catch { showToast('Failed to delete context', 'error'); }
+  }
+
+  let agentSettingsLoaded = false;
+  $effect(() => {
+    if (activeTab === 'agent' && show && !agentSettingsLoaded) {
+      agentSettingsLoaded = true;
+      loadAgentPlugins();
+      loadAgentContexts();
+    }
+    if (!show) {
+      agentSettingsLoaded = false;
+      agentSubTab = 'general';
+      cancelEditContext();
     }
   });
 </script>
@@ -590,6 +736,215 @@
                   {/each}
                 </div>
                 <p class="ai-pricing-note">Haiku 4.5: $1.00 / MTok in &middot; $5.00 / MTok out</p>
+              </div>
+            {/if}
+          {/if}
+        {/if}
+
+      {:else if activeTab === 'agent'}
+        <!-- Agent sub-tabs -->
+        <div class="ai-subtabs">
+          <button class="ai-subtab" class:active={agentSubTab === 'general'} onclick={() => agentSubTab = 'general'}>
+            General
+          </button>
+          <button class="ai-subtab" class:active={agentSubTab === 'plugins'} onclick={() => agentSubTab = 'plugins'}>
+            Plugins
+          </button>
+          <button class="ai-subtab" class:active={agentSubTab === 'contexts'} onclick={() => agentSubTab = 'contexts'}>
+            Contexts
+          </button>
+        </div>
+
+        {#if agentSubTab === 'general'}
+          <div class="stg-section">
+            <span class="stg-section-label">Session</span>
+            <div class="stg-field" style="flex-direction: column; align-items: stretch;">
+              <label class="stg-label">Session Key</label>
+              <span class="agent-field-desc">Used to fetch usage limits from Claude AI</span>
+              <input
+                class="stg-input"
+                type="password"
+                style="width: 100%;"
+                value={agentSessionKey}
+                placeholder="session key..."
+                onchange={(e) => handleSettingChange('agent_session_key', e.currentTarget.value)}
+              />
+            </div>
+          </div>
+
+          <div class="stg-section">
+            <span class="stg-section-label">Notifications</span>
+            <div class="stg-field">
+              <label class="stg-label">Enable notifications when Claude needs input</label>
+              <label class="stg-toggle">
+                <input type="checkbox" checked={agentNotifyEnabled}
+                  onchange={(e) => handleSettingChange('agent_notify_enabled', String(e.currentTarget.checked))} />
+                <span class="stg-toggle-slider"></span>
+              </label>
+            </div>
+            <div class="stg-field">
+              <label class="stg-label">Enable sound alerts</label>
+              <label class="stg-toggle">
+                <input type="checkbox" checked={agentSoundEnabled}
+                  onchange={(e) => handleSettingChange('agent_sound_enabled', String(e.currentTarget.checked))} />
+                <span class="stg-toggle-slider"></span>
+              </label>
+            </div>
+            <div class="stg-field">
+              <label class="stg-label">Enable dock bounce</label>
+              <label class="stg-toggle">
+                <input type="checkbox" checked={agentDockBounceEnabled}
+                  onchange={(e) => handleSettingChange('agent_dock_bounce_enabled', String(e.currentTarget.checked))} />
+                <span class="stg-toggle-slider"></span>
+              </label>
+            </div>
+          </div>
+
+        {:else if agentSubTab === 'plugins'}
+          <!-- Installed / Marketplace toggle -->
+          <div class="agent-plugin-views">
+            <button class="ai-action-btn" class:primary={pluginView === 'installed'} onclick={() => pluginView = 'installed'}>Installed</button>
+            <button class="ai-action-btn" class:primary={pluginView === 'marketplace'} onclick={() => pluginView = 'marketplace'}>Marketplace</button>
+          </div>
+
+          {#if pluginView === 'installed'}
+            {#if installedPlugins.length === 0}
+              <div class="ai-usage-empty">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="var(--t4)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.5 7.27783L12 12.0001M12 12.0001L3.49997 7.27783M12 12.0001L12 21.5001M14 20.6701L12.7 21.4001C12.2 21.6001 11.8 21.6001 11.3 21.4001L4.8 17.7001C4.3 17.4001 4 16.9001 4 16.3001V7.70011C4 7.10011 4.3 6.60011 4.8 6.30011L11.3 2.60011C11.8 2.40011 12.2 2.40011 12.7 2.60011L19.2 6.30011C19.7 6.60011 20 7.10011 20 7.70011V16.3001"/></svg>
+                <p>No plugins installed</p>
+                <span>Browse the marketplace to install plugins</span>
+              </div>
+            {:else}
+              <div class="agent-plugin-list">
+                {#each installedPlugins as plugin}
+                  <div class="agent-plugin-card">
+                    <div class="agent-plugin-info">
+                      <span class="agent-plugin-name">{plugin.name}</span>
+                      <span class="agent-plugin-meta">
+                        {plugin.marketplace}
+                        {#if plugin.version}
+                          <span class="ai-link-sep">&middot;</span> v{plugin.version}
+                        {/if}
+                      </span>
+                    </div>
+                    <div class="agent-plugin-actions">
+                      <label class="stg-toggle">
+                        <input type="checkbox" checked={plugin.enabled}
+                          onchange={() => handleTogglePlugin(plugin.name, !plugin.enabled)} />
+                        <span class="stg-toggle-slider"></span>
+                      </label>
+                      <button class="ai-action-btn danger sm" onclick={() => handleUninstallPlugin(plugin.name)}>
+                        Uninstall
+                      </button>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+          {:else}
+            <div class="agent-marketplace-search">
+              <input
+                class="stg-input"
+                type="text"
+                style="width: 100%;"
+                placeholder="Search plugins..."
+                bind:value={pluginSearchQuery}
+              />
+            </div>
+            {#if filteredMarketplacePlugins.length === 0}
+              <div class="ai-usage-empty">
+                <p>No plugins found</p>
+              </div>
+            {:else}
+              <div class="agent-plugin-list">
+                {#each filteredMarketplacePlugins as plugin}
+                  <div class="agent-plugin-card">
+                    <div class="agent-plugin-info">
+                      <span class="agent-plugin-name">{plugin.name}</span>
+                      <span class="agent-plugin-desc">{plugin.description}</span>
+                      {#if plugin.installs != null}
+                        <span class="agent-plugin-meta">{plugin.installs.toLocaleString()} installs</span>
+                      {/if}
+                    </div>
+                    <div class="agent-plugin-actions">
+                      {#if plugin.installed}
+                        <span class="ai-status-badge">
+                          <span class="ai-status-dot"></span>
+                          Installed
+                        </span>
+                      {:else}
+                        <button class="ai-action-btn primary sm" onclick={() => handleInstallPlugin(plugin.name, plugin.marketplace)}>
+                          Install
+                        </button>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          {/if}
+
+        {:else if agentSubTab === 'contexts'}
+          {#if isNewContext || editingContext}
+            <!-- Context editor -->
+            <div class="agent-ctx-editor">
+              <div class="stg-field" style="flex-direction: column; align-items: stretch;">
+                <label class="stg-label">Name</label>
+                <input
+                  class="stg-input"
+                  type="text"
+                  style="width: 100%;"
+                  placeholder="Context name..."
+                  bind:value={editContextName}
+                />
+              </div>
+              <div class="stg-field" style="flex-direction: column; align-items: stretch;">
+                <label class="stg-label">Content</label>
+                <textarea
+                  class="agent-ctx-textarea"
+                  placeholder="Context content..."
+                  bind:value={editContextContent}
+                ></textarea>
+              </div>
+              <div class="ai-key-actions">
+                <button class="ai-action-btn primary" onclick={handleSaveAgentContext}>Save</button>
+                <button class="ai-action-btn" onclick={cancelEditContext}>Cancel</button>
+              </div>
+            </div>
+          {:else}
+            <div class="agent-ctx-header">
+              <span class="stg-section-label" style="margin-bottom: 0;">Contexts</span>
+              <button class="ai-action-btn primary sm" onclick={startNewContext}>New Context</button>
+            </div>
+
+            {#if agentContexts.length === 0}
+              <div class="ai-usage-empty">
+                <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="var(--t4)" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                <p>No contexts yet</p>
+                <span>Create a context to attach to agent sessions</span>
+              </div>
+            {:else}
+              <div class="agent-plugin-list">
+                {#each agentContexts as ctx}
+                  <div class="agent-plugin-card agent-ctx-card" onclick={() => startEditContext(ctx)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') startEditContext(ctx); }}>
+                    <div class="agent-plugin-info">
+                      <span class="agent-plugin-name">{ctx.name}</span>
+                      <span class="agent-plugin-desc">{ctx.content.split('\n')[0].slice(0, 80)}{ctx.content.length > 80 ? '...' : ''}</span>
+                    </div>
+                    <div class="agent-plugin-actions" onclick={(e) => { e.stopPropagation(); }}>
+                      {#if deleteConfirmId === ctx.id}
+                        <span class="ai-reset-confirm">
+                          <span>Delete?</span>
+                          <button class="ai-action-btn danger sm" onclick={(e) => { e.stopPropagation(); handleDeleteAgentContext(ctx.id); }}>Yes</button>
+                          <button class="ai-action-btn sm" onclick={(e) => { e.stopPropagation(); deleteConfirmId = null; }}>No</button>
+                        </span>
+                      {:else}
+                        <button class="ai-action-btn danger sm" onclick={(e) => { e.stopPropagation(); deleteConfirmId = ctx.id; }}>Delete</button>
+                      {/if}
+                    </div>
+                  </div>
+                {/each}
               </div>
             {/if}
           {/if}
@@ -1602,5 +1957,105 @@
     font-family: var(--mono);
     margin: 8px 0 0;
     text-align: right;
+  }
+
+  /* -- Agent Tab -- */
+  .agent-field-desc {
+    font-size: 10.5px;
+    color: var(--t4);
+    font-family: var(--ui);
+    margin-bottom: 6px;
+  }
+  .agent-plugin-views {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .agent-plugin-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .agent-plugin-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background: var(--n2);
+    border: 1px solid var(--b1);
+    border-radius: var(--radius-lg);
+    gap: 12px;
+  }
+  .agent-ctx-card {
+    cursor: default;
+    transition: border-color 0.12s;
+  }
+  .agent-ctx-card:hover {
+    border-color: var(--b2);
+  }
+  .agent-plugin-info {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1;
+  }
+  .agent-plugin-name {
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--t1);
+    font-family: var(--ui);
+  }
+  .agent-plugin-desc {
+    font-size: 11px;
+    color: var(--t3);
+    font-family: var(--ui);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .agent-plugin-meta {
+    font-size: 10.5px;
+    color: var(--t4);
+    font-family: var(--mono);
+  }
+  .agent-plugin-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  .agent-marketplace-search {
+    margin-bottom: 14px;
+  }
+  .agent-ctx-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .agent-ctx-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .agent-ctx-textarea {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--b1);
+    border-radius: var(--radius-md);
+    padding: 8px 12px;
+    color: var(--t1);
+    font-family: var(--mono);
+    font-size: 12px;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 160px;
+    resize: vertical;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .agent-ctx-textarea:focus {
+    border-color: var(--acc);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--acc) 12%, transparent);
   }
 </style>
