@@ -119,6 +119,7 @@ pub fn run() {
             app.manage(pool);
             app.manage(Arc::new(commands::sql_client::SqlConnectionManager::new()));
             app.manage(commands::nosql_client::create_nosql_state());
+            app.manage(commands::agent_models::TerminalState::default());
 
             // Apply vibrancy on macOS — use Sidebar material (what native macOS apps use)
             if let Some(window) = app.get_webview_window("main") {
@@ -227,6 +228,52 @@ pub fn run() {
             commands::ai::reset_ai_usage,
             commands::ai::record_ai_usage,
             commands::ai::ai_chat,
+            // Agent mode
+            commands::agent::agent_list_sessions,
+            commands::agent::agent_create_session,
+            commands::agent::agent_update_session,
+            commands::agent::agent_delete_session,
+            commands::agent::agent_update_session_id,
+            commands::agent::agent_update_last_used,
+            commands::agent::agent_update_worktree,
+            commands::agent::agent_list_contexts,
+            commands::agent::agent_save_context,
+            commands::agent::agent_delete_context,
+            commands::agent::agent_get_session_contexts,
+            commands::agent::agent_attach_context,
+            commands::agent::agent_detach_context,
+            commands::agent_terminal::agent_spawn_terminal,
+            commands::agent_terminal::agent_spawn_shell,
+            commands::agent_terminal::agent_write_to_terminal,
+            commands::agent_terminal::agent_resize_terminal,
+            commands::agent_terminal::agent_kill_terminal,
+            commands::agent_worktree::agent_is_git_repo,
+            commands::agent_worktree::agent_create_worktree,
+            commands::agent_worktree::agent_remove_worktree,
+            commands::agent_git::agent_git_status,
+            commands::agent_git::agent_git_branch,
+            commands::agent_git::agent_git_ahead_behind,
+            commands::agent_git::agent_git_commit,
+            commands::agent_git::agent_git_push,
+            commands::agent_git::agent_git_pull,
+            commands::agent_git::agent_git_diff_file,
+            commands::agent_git::agent_git_stage_file,
+            commands::agent_git::agent_git_unstage_file,
+            commands::agent_git::agent_git_log,
+            commands::agent_git::agent_git_stash,
+            commands::agent_git::agent_git_stash_pop,
+            commands::agent_git::agent_git_list_branches,
+            commands::agent_git::agent_git_switch_branch,
+            commands::agent_plugins::agent_get_plugins,
+            commands::agent_plugins::agent_toggle_plugin,
+            commands::agent_plugins::agent_get_marketplace_plugins,
+            commands::agent_plugins::agent_install_plugin,
+            commands::agent_plugins::agent_uninstall_plugin,
+            commands::agent_usage::agent_get_usage_analytics,
+            commands::agent_usage::agent_fetch_usage_limits,
+            commands::agent_usage::agent_discover_sessions,
+            commands::agent_usage::agent_get_session_tokens,
+            commands::agent_usage::agent_get_session_context_usage,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
