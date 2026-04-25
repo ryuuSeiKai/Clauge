@@ -46,8 +46,10 @@ pub fn agent_spawn_terminal(
     }
     if let Some(ref prompt) = context_prompt {
         if !prompt.is_empty() {
-            let escaped = prompt.replace('\\', "\\\\").replace('"', "\\\"");
-            claude_cmd.push_str(&format!(" --append-system-prompt \"{}\"", escaped));
+            // Use single quotes to prevent ALL shell interpretation (< > $ ` etc.)
+            // Escape single quotes within the prompt: ' -> '\''
+            let escaped = prompt.replace('\'', "'\\''");
+            claude_cmd.push_str(&format!(" --append-system-prompt '{}'", escaped));
         }
     }
 
