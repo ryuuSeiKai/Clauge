@@ -214,7 +214,7 @@
         </button>
       </div>
     {:else}
-      <img src="/qorix-animated-icon.svg" alt="Clauge" width="34" height="34" />
+      <img src="/clauge-icon.svg" alt="Clauge" width="34" height="34" />
     {/if}
   </div>
 

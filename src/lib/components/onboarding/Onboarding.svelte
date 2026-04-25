@@ -170,7 +170,7 @@
         <div class="step">
           <div class="step-content welcome-step">
             <div class="bear-icon">
-              <img src="/qorix-animated-icon.svg" alt="Clauge" width="140" height="140" />
+              <img src="/clauge-icon.svg" alt="Clauge" width="140" height="140" />
             </div>
             <h1 class="ob-title">Welcome to Clauge</h1>
             <p class="ob-subtitle">Your developer super-app. Four powerful modes in one place — Agent, REST, SQL, and NoSQL — backed by AI to supercharge your workflow.</p>
