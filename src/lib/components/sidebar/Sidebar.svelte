@@ -436,14 +436,16 @@
     width: 100%;
   }
   .wc-area {
+    width: 72px;
+    height: 46px;
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 14px 0 8px;
     flex-shrink: 0;
   }
   .wc-dots {
     display: flex;
+    align-items: center;
     gap: 8px;
   }
   .wc-dot {
@@ -453,9 +455,12 @@
     border: none;
     cursor: default;
     padding: 0;
-    transition: opacity 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: filter 0.1s;
   }
-  .wc-dot:hover { opacity: 0.8; }
+  .wc-dot:hover { filter: brightness(0.85); }
   .wc-close { background: #ff5f57; }
   .wc-min { background: #febc2e; }
   .wc-max { background: #28c840; }
@@ -575,6 +580,16 @@
   .pm-logout svg { stroke: var(--err) !important; }
   .pm-logout:hover { background: rgba(240,68,68,0.08) !important; }
   /* Active mode left-border accent pills */
+  :global(#sbi-agent.on::before) {
+    content: '';
+    position: absolute;
+    left: -1px;
+    top: 7px;
+    bottom: 7px;
+    width: 2px;
+    border-radius: 0 2px 2px 0;
+    background: var(--agent);
+  }
   :global(#sbi-rest.on::before) {
     content: '';
     position: absolute;

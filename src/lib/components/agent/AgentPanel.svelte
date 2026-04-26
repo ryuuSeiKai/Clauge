@@ -61,6 +61,7 @@
 
   // Loading state for terminal spawn
   let spawning = $state(false);
+  let termReady = $state(false);
 
   // Context usage polling interval
   let contextUsageInterval: ReturnType<typeof setInterval> | null = null;
@@ -328,6 +329,10 @@
     const sIds = get(agentShellIds);
 
     if (sEntry && sIds.get(session.id)) {
+      // Re-attach container if orphaned (shell toggle destroys/re-creates shellEl)
+      if (sEntry.container.parentElement !== shellEl) {
+        shellEl.appendChild(sEntry.container);
+      }
       showShellEntry(sEntry);
       return;
     }
@@ -372,19 +377,28 @@
     }, 5000);
   }
 
+  let _spawnLock = false;
+  let _spawnGeneration = 0; // Increments on each spawn to invalidate old Channel handlers
+
   async function selectSession(session: any) {
-    if (!session || !terminalEl) return;
+    console.log(`[TERM] selectSession called: id=${session?.id}, title=${session?.title}`);
+    if (!session || !terminalEl) { console.log('[TERM] SKIP: no session or terminalEl'); return; }
+    if (_spawnLock && currentSessionId === session.id) { console.log('[TERM] SKIP: spawnLock active for same session'); return; }
     currentSessionId = session.id;
 
     const tMap = get(agentTerminalMap);
     let entry = tMap.get(session.id);
     const tIds = get(agentTerminalIds);
+    console.log(`[TERM] hasEntry=${!!entry}, hasTermId=${!!tIds.get(session.id)}, termId=${tIds.get(session.id) || 'none'}`);
 
     if (entry && tIds.get(session.id)) {
       // Re-attach container if orphaned (after mode switch destroys/re-creates DOM)
       if (entry.container.parentElement !== terminalEl) {
         terminalEl.appendChild(entry.container);
       }
+      console.log('[TERM] EARLY RETURN: reusing existing running terminal');
+      termReady = true;
+      spawning = false;
       showTermEntry(entry);
       if (session.claudeSessionId) startContextUsagePolling(session);
       if (get(agentShellOpen)) {
@@ -399,13 +413,29 @@
       return;
     }
 
-    // Create or reuse terminal entry
-    if (!entry) {
-      entry = createTermEntry(session.id);
-    } else {
-      entry.term.clear();
-      entry.term.write('\r\n\x1b[2mResuming session...\x1b[0m\r\n\r\n');
+    console.log(`[TERM] SPAWNING NEW terminal for session ${session.id}, gen=${_spawnGeneration + 1}`);
+    // Kill old PTY process if still lingering
+    const oldTermId = get(agentTerminalIds).get(session.id);
+    if (oldTermId) {
+      console.log(`[TERM] Killing old PTY: ${oldTermId}`);
+      agentKillTerminal(oldTermId).catch(() => {});
+      agentTerminalIds.update(m => { m.delete(session.id); return new Map(m); });
     }
+
+    // Invalidate old Channel handlers
+    _spawnGeneration++;
+
+    // Always dispose old xterm and create fresh — prevents stale data from old Channels
+    if (entry) {
+      entry.container.remove();
+      entry.term.dispose();
+      agentTerminalMap.update(m => { m.delete(session.id); return new Map(m); });
+    }
+
+    termReady = false;
+    spawning = true;
+    _spawnLock = true;
+    entry = createTermEntry(session.id);
     showTermEntry(entry);
 
     try {
@@ -453,10 +483,14 @@
       let outputReceived = false;
       let activityTimer: ReturnType<typeof setTimeout> | null = null;
       const sessionId = session.id;
+      const myGeneration = _spawnGeneration; // Capture current generation
+      console.log(`[TERM] Creating Channel, gen=${myGeneration}, about to call agentSpawnTerminal`);
       const onOutput = new Channel();
 
       onOutput.onmessage = (payload: any) => {
-        if (spawning) spawning = false;
+        // Ignore data from old/stale Channel if a newer spawn happened
+        if (myGeneration !== _spawnGeneration) { console.log(`[TERM] STALE Channel write blocked: myGen=${myGeneration}, currentGen=${_spawnGeneration}`); return; }
+        if (spawning) { spawning = false; termReady = true; }
         // Write data to terminal
         if (entry!.term) {
           try {
@@ -482,15 +516,15 @@
             .replace(/\x1b\][^\x07]*\x07/g, '');
 
           if (/Resume this session with:/i.test(clean) || /claude --resume [a-f0-9-]{8,}/.test(clean) || /session has ended|Exiting Claude/i.test(clean)) {
+            console.log(`[TERM] EXIT DETECTED for session ${sessionId}, gen=${myGeneration}`);
             agentTerminalIds.update(m => { m.delete(sessionId); return new Map(m); });
             entry!._exitBuffer = '';
+            // Capture session ID if not already set (for future --resume)
             const resumeMatch = clean.match(/claude --resume ([a-f0-9-]+)/);
             if (resumeMatch && !session.claudeSessionId) {
               const extractedSessionId = resumeMatch[1];
-              agentUpdateSessionId(session.id, extractedSessionId).then(() => {
-                session.claudeSessionId = extractedSessionId;
-                loadAgentSessions();
-              }).catch(() => {});
+              agentUpdateSessionId(session.id, extractedSessionId).catch(() => {});
+              session.claudeSessionId = extractedSessionId;
             }
             agentSessionActivity.update(m => { m.set(sessionId, 'done'); return new Map(m); });
 
@@ -511,6 +545,7 @@
               }
             }
             _suppressExit = false;
+            return; // Stop processing — terminal is dead
           }
         } catch (_) {}
 
@@ -573,6 +608,7 @@
         gitEmail: session.gitEmail || undefined,
         onOutput,
       });
+      console.log(`[TERM] Spawn complete: termId=${termId}, gen=${myGeneration}`);
       agentTerminalIds.update(m => { m.set(session.id, termId); return new Map(m); });
 
       // Start context usage polling (Feature 2)
@@ -591,6 +627,8 @@
       refreshAgentGitStatus();
     } catch (e) {
       entry.term.write(`\r\nFailed to spawn terminal: ${e}\r\n`);
+    } finally {
+      _spawnLock = false;
     }
   }
 
@@ -649,8 +687,9 @@
 
   // React to session changes
   const unsubSession = activeAgentSession.subscribe((session) => {
+    console.log(`[TERM] SUBSCRIBER: session=${session?.id || 'null'}, currentSessionId=${currentSessionId}, match=${session?.id === currentSessionId}`);
     if (session && session.id !== currentSessionId) {
-      // Wait for DOM
+      console.log(`[TERM] SUBSCRIBER: triggering selectSession via rAF`);
       requestAnimationFrame(() => selectSession(session));
     } else if (!session) {
       currentSessionId = null;
@@ -845,7 +884,9 @@
 
     // Re-attach terminal after mode switch (component re-mount)
     const currentSession = get(activeAgentSession);
+    console.log(`[TERM] onMount: currentSession=${currentSession?.id || 'null'}`);
     if (currentSession) {
+      console.log(`[TERM] onMount: re-attaching session ${currentSession.id}`);
       currentSessionId = null; // Force selectSession to process
       requestAnimationFrame(() => selectSession(currentSession));
     }
@@ -869,25 +910,27 @@
     <div class="agent-terminal-main" style="width:{$agentShellOpen ? mainWidth + '%' : '100%'}">
       {#if spawning}
         <div class="agent-loading">
-          <div class="agent-loading-dot"></div>
-          <span>Launching session...</span>
+          <img src="/code-in-action.svg" alt="" class="loading-mascot" />
+          <div class="loading-text">
+            <span class="loading-title">Starting Claude Code</span>
+            <span class="loading-sub">Setting up terminal session<span class="loading-dots"></span></span>
+          </div>
         </div>
       {/if}
-      <div class="agent-terminal-container" bind:this={terminalEl}></div>
+      <div class="agent-terminal-container" class:term-hidden={!termReady} bind:this={terminalEl}></div>
     </div>
 
-    {#if $agentShellOpen}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
-      <div
-        class="agent-divider"
-        class:active={dragging}
-        onmousedown={handleDividerMousedown}
-      ></div>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="agent-divider"
+      class:active={dragging}
+      style="display:{$agentShellOpen ? 'block' : 'none'}"
+      onmousedown={handleDividerMousedown}
+    ></div>
 
-      <div class="agent-shell-panel" style="width:{100 - mainWidth}%">
-        <div class="agent-shell-container" bind:this={shellEl}></div>
-      </div>
-    {/if}
+    <div class="agent-shell-panel" style="display:{$agentShellOpen ? 'flex' : 'none'};width:{100 - mainWidth}%;flex:none;">
+      <div class="agent-shell-container" bind:this={shellEl}></div>
+    </div>
   </div>
 {:else}
   <div class="agent-empty">
@@ -921,54 +964,92 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    opacity: 1;
+    transition: opacity 0.35s ease;
   }
-  .agent-terminal-container :global(.xterm) {
-    animation: termFadeIn 0.4s ease;
+  .agent-terminal-container.term-hidden {
+    opacity: 0;
   }
+  /* Thin scrollbar for xterm */
+  .agent-terminal-container :global(.xterm-viewport::-webkit-scrollbar) { width: 4px; }
+  .agent-terminal-container :global(.xterm-viewport::-webkit-scrollbar-thumb) { background: var(--b1); border-radius: 2px; }
+  .agent-terminal-container :global(.xterm-viewport::-webkit-scrollbar-thumb:hover) { background: var(--t4); }
+  .agent-shell-container :global(.xterm-viewport::-webkit-scrollbar) { width: 4px; }
+  .agent-shell-container :global(.xterm-viewport::-webkit-scrollbar-thumb) { background: var(--b1); border-radius: 2px; }
+  .agent-shell-container :global(.xterm-viewport::-webkit-scrollbar-thumb:hover) { background: var(--t4); }
 
   .agent-loading {
     position: absolute;
     inset: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 10px;
-    color: var(--t3);
-    font-size: 12px;
-    font-family: var(--ui);
+    gap: 16px;
     z-index: 2;
-    animation: fadeIn 0.2s ease;
+    animation: loadFadeIn 0.3s ease;
   }
-  .agent-loading-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--acc);
-    animation: loadPulse 1s ease-in-out infinite;
+  .loading-mascot {
+    width: 48px;
+    height: 48px;
+    opacity: 0.7;
   }
-  @keyframes loadPulse {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 1; }
+  .loading-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
   }
-  @keyframes fadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+  .loading-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--t2);
+    font-family: var(--ui);
   }
-  @keyframes termFadeIn {
-    from { opacity: 0; }
-    to { opacity: 1; }
+  .loading-sub {
+    font-size: 11px;
+    color: var(--t4);
+    font-family: var(--ui);
+  }
+  .loading-dots::after {
+    content: '';
+    animation: dots 1.5s steps(4, end) infinite;
+  }
+  @keyframes dots {
+    0% { content: ''; }
+    25% { content: '.'; }
+    50% { content: '..'; }
+    75% { content: '...'; }
+  }
+  @keyframes loadFadeIn {
+    from { opacity: 0; transform: scale(0.97); }
+    to { opacity: 1; transform: scale(1); }
   }
 
   .agent-divider {
     width: 4px;
+    background: transparent;
     flex-shrink: 0;
-    background: var(--b1);
     cursor: col-resize;
     position: relative;
-    transition: background 0.12s;
   }
-  .agent-divider:hover,
-  .agent-divider.active {
+  .agent-divider::after {
+    content: '';
+    position: absolute;
+    left: 1px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--b1);
+  }
+  .agent-divider:hover::after {
     background: var(--acc);
+    width: 2px;
+    left: 1px;
+  }
+  .agent-divider.active::after {
+    background: var(--acc);
+    width: 2px;
   }
 
   .agent-shell-panel {

@@ -26,18 +26,17 @@
 
   $effect(() => {
     const modal = $activeModal;
-    if (modal === 'settings' || modal === 'settings:ai') {
+    if (modal === 'settings' || modal === 'settings:ai' || modal === 'settings:agent') {
       show = true;
-      if (modal === 'settings:ai') {
-        activeTab = 'ai';
-      }
+      if (modal === 'settings:ai') activeTab = 'ai';
+      if (modal === 'settings:agent') activeTab = 'agent';
     } else {
       show = false;
     }
   });
 
   $effect(() => {
-    if (!show && ($activeModal === 'settings' || $activeModal === 'settings:ai')) {
+    if (!show && ($activeModal === 'settings' || $activeModal === 'settings:ai' || $activeModal === 'settings:agent')) {
       activeModal.set(null);
     }
   });
@@ -141,6 +140,13 @@
 
   async function handleSettingChange(key: string, value: string) {
     await setSetting(key, value);
+    // If session key changed, update store and fetch limits immediately
+    if (key === 'agent_session_key') {
+      import('$lib/stores/agent').then(({ agentSessionKey, loadAgentUsageLimits }) => {
+        agentSessionKey.set(value);
+        if (value) loadAgentUsageLimits();
+      });
+    }
   }
 
   async function handleThemeChange(themeId: string) {

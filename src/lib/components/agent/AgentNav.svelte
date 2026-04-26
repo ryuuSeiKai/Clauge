@@ -61,6 +61,8 @@
   }
 
   function handleSelectSession(session: AgentSession) {
+    // Don't re-select the already active session
+    if ($activeAgentSession?.id === session.id) return;
     activeAgentSession.set(session);
     window.dispatchEvent(new CustomEvent('agent:select-session', { detail: { session } }));
   }
@@ -175,7 +177,13 @@
             onclick={() => handleSelectSession(session)}
             oncontextmenu={(e) => showSessionMenu(e, session)}
           >
-            <span class="status-dot" class:active={$activeAgentSession?.id === session.id} class:bg-running={activity === 'running'}></span>
+            <span class="session-icon">
+              {#if activity === 'running'}
+                <img src="/code-in-action.svg" alt="" width="20" height="20" />
+              {:else}
+                <img src="/code-no-action.svg" alt="" width="16" height="16" />
+              {/if}
+            </span>
             <div class="session-body">
               <div class="session-row-top">
                 <span class="session-title">{session.title}</span>
@@ -188,9 +196,11 @@
                 {#if session.worktreePath}
                   <span class="wt-badge" title="Isolated worktree: {session.worktreeBranch}">WT</span>
                 {/if}
+                <span class="session-time-spacer"></span>
                 <span class="session-time">{relativeTime(session.lastUsedAt)}</span>
               </div>
             </div>
+            <!-- svelte-ignore a11y_click_events_have_key_events -->
             <span
               class="session-ellipsis"
               role="button"
@@ -307,13 +317,13 @@
   /* Session item */
   .session-item {
     width: 100%;
-    min-height: 44px;
+    min-height: 46px;
     border: none;
     background: transparent;
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
-    padding: 6px 8px 6px 20px;
+    padding: 5px 8px 5px 16px;
     cursor: pointer;
     transition: background 0.08s;
     text-align: left;
@@ -322,16 +332,16 @@
   .session-item:hover { background: var(--c); }
   .session-item.active { background: color-mix(in srgb, var(--agent, var(--acc)) 10%, transparent); }
 
-  .status-dot {
-    width: 6px; height: 6px; border-radius: 50%;
+  .session-icon {
+    width: 22px;
+    height: 22px;
     flex-shrink: 0;
-    background: var(--t4);
-    margin-top: 7px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
   }
-  .status-dot.active { background: var(--acc); }
-  .status-dot.bg-running {
-    background: #3fb950;
-    box-shadow: 0 0 4px rgba(63, 185, 80, 0.4);
+  .session-icon img {
+    display: block;
   }
 
   .session-body {
@@ -339,7 +349,7 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
   }
 
   .session-row-top {
@@ -374,6 +384,10 @@
     border-radius: 4px;
     white-space: nowrap;
     line-height: 1.4;
+  }
+
+  .session-time-spacer {
+    flex: 1;
   }
 
   .session-time {
@@ -417,7 +431,6 @@
     display: none; align-items: center; justify-content: center;
     border-radius: 3px; flex-shrink: 0; cursor: default;
     color: var(--t3); transition: background 0.1s, color 0.1s;
-    margin-top: 3px;
   }
   .session-ellipsis svg { width: 14px; height: 14px; }
   .session-item:hover .session-ellipsis { display: flex; }

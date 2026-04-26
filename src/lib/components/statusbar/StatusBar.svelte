@@ -3,7 +3,8 @@
   import { githubConnected, syncing, lastSyncedAt } from '$lib/stores/github';
   import { updateAvailable, showWhatsNewModal } from '$lib/utils/updater';
   import { mode } from '$lib/stores/app';
-  import { agentGitBranchName, agentGitFiles, agentGitAhead, agentGitBehind, activeAgentSession, agentUsageLimits, agentShellOpen } from '$lib/stores/agent';
+  import { agentGitBranchName, agentGitFiles, agentGitAhead, agentGitBehind, activeAgentSession, agentUsageLimits, agentShellOpen, agentSessionKey } from '$lib/stores/agent';
+  import { activeModal } from '$lib/stores/app';
   import AgentGitPanel from '$lib/components/agent/AgentGitPanel.svelte';
 
   let gitPanelOpen = $state(false);
@@ -42,17 +43,14 @@
     const limits = $agentUsageLimits;
     if (!limits) return [];
     const chips: UsageChip[] = [];
-    if (limits.sessionPercent != null) {
-      const pct = Math.round(limits.sessionPercent);
+    // Claude API returns { standard: { percentUsed }, extended: { percentUsed } }
+    if (limits.standard?.percentUsed != null) {
+      const pct = Math.round(limits.standard.percentUsed);
       chips.push({ label: 'Session', pct, color: usageColor(pct) });
     }
-    if (limits.weeklyPercent != null) {
-      const pct = Math.round(limits.weeklyPercent);
-      chips.push({ label: 'Weekly', pct, color: usageColor(pct) });
-    }
-    if (limits.sonnetPercent != null) {
-      const pct = Math.round(limits.sonnetPercent);
-      chips.push({ label: 'Sonnet', pct, color: usageColor(pct) });
+    if (limits.extended?.percentUsed != null) {
+      const pct = Math.round(limits.extended.percentUsed);
+      chips.push({ label: 'Extended', pct, color: usageColor(pct) });
     }
     return chips;
   });
@@ -68,29 +66,39 @@
 
 {#if $mode === 'agent'}
 <footer class="statusbar glass-surface">
+  {#if $agentGitBranchName}
   <div class="sl">
     <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
     <div class="si git-clickable" onclick={(e) => { e.stopPropagation(); gitPanelOpen = !gitPanelOpen; }}>
       <svg style="width:10px;height:10px;stroke:var(--t3);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round" viewBox="0 0 24 24"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 01-9 9"/></svg>
-      <span>{$agentGitBranchName || '—'}</span>
+      <span>{$agentGitBranchName}</span>
       {#if $agentGitAhead > 0}<span class="git-ahead">↑{$agentGitAhead}</span>{/if}
       {#if $agentGitBehind > 0}<span class="git-behind">↓{$agentGitBehind}</span>{/if}
       {#if $agentGitFiles.length > 0}<span class="git-changes">{$agentGitFiles.length}</span>{/if}
     </div>
   </div>
   <AgentGitPanel bind:open={gitPanelOpen} />
+  {/if}
   <div class="sc">
-    {#each usageChips as chip}
+    {#if usageChips.length > 0}
+      {#each usageChips as chip}
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div class="si usage-chip" style="color:{chip.color}" onclick={showUsageDashboard}>
+          <span class="sled" style="background:{chip.color}"></span>
+          <span>{chip.label} {chip.pct}%</span>
+        </div>
+      {/each}
+    {:else if !$agentSessionKey}
       <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-      <div class="si usage-chip" style="color:{chip.color}" onclick={showUsageDashboard}>
-        <span class="sled" style="background:{chip.color}"></span>
-        <span>{chip.label} {chip.pct}%</span>
+      <div class="si setup-usage" onclick={() => activeModal.set('settings:agent')}>
+        <svg style="width:10px;height:10px;stroke:var(--t4);fill:none;stroke-width:1.7;stroke-linecap:round" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+        <span>Set up usage tracking</span>
       </div>
-    {/each}
+    {/if}
   </div>
   <div class="sr">
     <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="si shell-toggle" onclick={() => agentShellOpen.update(v => !v)}>
+    <div class="si shell-toggle" onclick={() => { if ($activeAgentSession) agentShellOpen.update(v => !v); }}>
       <svg style="width:10px;height:10px;stroke:{$agentShellOpen ? 'var(--acc)' : 'var(--t3)'};fill:none;stroke-width:1.7;stroke-linecap:round" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
       <span style="color:{$agentShellOpen ? 'var(--acc)' : ''}">Shell</span>
     </div>
@@ -209,6 +217,16 @@
   }
   .usage-chip:hover {
     background: rgba(255,255,255,0.06);
+  }
+  .setup-usage {
+    cursor: pointer;
+    color: var(--t4);
+    padding: 1px 6px;
+    border-radius: 4px;
+    transition: color 0.1s;
+  }
+  .setup-usage:hover {
+    color: var(--acc);
   }
   .shell-toggle {
     cursor: pointer;

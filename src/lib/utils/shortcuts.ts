@@ -94,9 +94,12 @@ function handleKeydown(e: KeyboardEvent) {
   if (meta && e.key === 'l' && !e.shiftKey) {
     const currentMode = get(mode);
     if (currentMode === 'agent') {
-      // In agent mode, Cmd+L toggles the shell panel
-      import('$lib/stores/agent').then(({ agentShellOpen }) => {
-        agentShellOpen.update(v => !v);
+      // In agent mode, Cmd+L toggles the shell panel (only if a session is active)
+      import('$lib/stores/agent').then(({ agentShellOpen, activeAgentSession }) => {
+        let hasSession = false;
+        const unsub = activeAgentSession.subscribe(s => { hasSession = !!s; });
+        unsub();
+        if (hasSession) agentShellOpen.update(v => !v);
       });
       e.preventDefault();
       return;
