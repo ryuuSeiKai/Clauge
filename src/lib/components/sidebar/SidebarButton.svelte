@@ -67,6 +67,17 @@
   .sbi.on {
     background: color-mix(in srgb, var(--acc) 10%, transparent);
   }
+  .sbi.on::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 16px;
+    border-radius: 0 2px 2px 0;
+    background: var(--acc);
+  }
   .sbi-dot {
     position: absolute;
     top: 4px;
