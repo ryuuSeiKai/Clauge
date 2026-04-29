@@ -8,10 +8,10 @@
     showSqlDisconnectConfirm, sqlDisconnectTarget
   } from '../stores';
   import { sqlListSchemas, sqlDescribeTable, sqlExecuteQuery, sqlCreateDatabase } from '../commands';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
-  import { showContextMenu } from '$lib/components/shared/contextmenu';
+  import { showContextMenu } from '$lib/shared/primitives/contextmenu';
   import type { SqlConnectionConfig, SqlConnection, TableInfo, ColumnInfo } from '../types';
   import { tabs, activeTabId } from '$lib/shared/stores/tabs';
   import { get } from 'svelte/store';

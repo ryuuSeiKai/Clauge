@@ -1,10 +1,10 @@
 <script lang="ts">
-  import Modal from '$lib/components/shared/Modal.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
   import { agentCreateSession, agentDiscoverSessions, agentListContexts, agentAttachContext, agentUpdateSessionId } from '../commands';
   import type { AgentContext, DiscoveredSession } from '../types';
   import { loadAgentSessions, agentSessions, activeAgentSession } from '../stores';
   import { tabs as tabsStore, addTab, activateTab } from '$lib/shared/stores/tabs';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { get } from 'svelte/store';
 
   // Mirror PURPOSE_COLORS used in +layout.svelte's session picker so the new

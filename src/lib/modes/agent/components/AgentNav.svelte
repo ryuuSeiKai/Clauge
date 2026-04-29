@@ -1,8 +1,8 @@
 <script lang="ts">
   import { agentSessions, activeAgentSession, agentContextUsage, agentSessionActivity, agentClaudePlan } from '../stores';
   import { mode } from '$lib/stores/app';
-  import { showContextMenu } from '$lib/components/shared/contextmenu';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showContextMenu } from '$lib/shared/primitives/contextmenu';
+  import { showToast } from '$lib/shared/primitives/toast';
   import type { AgentSession } from '../types';
   import { tabs, addTab, activateTab } from '$lib/shared/stores/tabs';
   import { get } from 'svelte/store';

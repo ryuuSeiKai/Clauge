@@ -1,6 +1,6 @@
 <script lang="ts">
   import { highlightJSON } from '$lib/shared/utils/json-highlight';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import FormKVEditor from './FormKVEditor.svelte';
   import MultipartEditor from './MultipartEditor.svelte';
   import BinaryPicker from './BinaryPicker.svelte';

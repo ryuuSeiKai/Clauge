@@ -5,7 +5,7 @@
   import { activeRequest, activeRequestId, requestEnvOverrides, commitRequest, currentRestResponse } from '$lib/modes/rest/stores';
   import { activeEnvId, getEffectiveEnvId } from '$lib/modes/rest/stores';
   import { executeRequest, quickExecute } from '$lib/modes/rest/commands';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { loadHistory } from '$lib/modes/rest/stores';
   import { mode } from '$lib/stores/app';

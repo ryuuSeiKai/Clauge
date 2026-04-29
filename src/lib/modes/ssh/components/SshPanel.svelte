@@ -22,7 +22,7 @@
   import { tabs as tabsStore, addTab, activateTab, closeTab } from '$lib/shared/stores/tabs';
   import { getTerminalTheme } from '$lib/utils/theme';
   import { appearance } from '$lib/stores/settings';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { resolveSshCapture, rejectAllSshCaptures, type SshCaptureRequest } from '../ai/execute';
   import type { SshProfile, SshTerminalPayload } from '../types';
   import { SSH_EVENT } from '$lib/shared/constants/events';

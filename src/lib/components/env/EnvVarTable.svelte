@@ -7,7 +7,7 @@
     deleteEnvVariable
   } from '$lib/modes/rest/stores';
   import type { EnvVariable } from '$lib/types';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
 
   interface Props {
     environmentId: string;

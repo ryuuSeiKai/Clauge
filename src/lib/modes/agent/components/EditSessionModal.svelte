@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Modal from '$lib/components/shared/Modal.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
   import { agentUpdateSession, agentListContexts, agentGetSessionContexts, agentAttachContext, agentDetachContext } from '../commands';
   import { loadAgentSessions, activeAgentSession } from '../stores';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import type { AgentSession, AgentContext } from '../types';
   import { AGENT_EVENT } from '$lib/shared/constants/events';
 

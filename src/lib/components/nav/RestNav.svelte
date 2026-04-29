@@ -1,6 +1,6 @@
 <script lang="ts">
   import { collections, loadCollections, createCollection } from '$lib/modes/rest/stores';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import CollectionItem from './CollectionItem.svelte';
   import InlineInput from './InlineInput.svelte';
   import * as cmd from '$lib/commands';

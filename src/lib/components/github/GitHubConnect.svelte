@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import Modal from '$lib/components/shared/Modal.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
   import { activeModal } from '$lib/stores/app';
   import { githubConnected, githubUsername, setConnected, setDisconnected, syncing, setSyncing, setLastSynced, markSynced, showSyncRestorePrompt } from '$lib/stores/github';
   import { githubDisconnect, githubGetOauthUrl, githubConnectWithToken, gistSyncPull, gistCheckExists } from '$lib/commands/github';
@@ -8,7 +8,7 @@
   import { connections as sqlConnections } from '$lib/modes/sql/stores';
   import { nosqlConnections } from '$lib/modes/nosql/stores';
   import { get } from 'svelte/store';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { loadCollections } from '$lib/modes/rest/stores';
   import { loadEnvironments } from '$lib/modes/rest/stores';

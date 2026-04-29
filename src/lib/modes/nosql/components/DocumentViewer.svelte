@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { nosqlFindDocuments, nosqlInsertDocument, nosqlUpdateDocument, nosqlDeleteDocument, nosqlCountDocuments } from '../commands';
   import { parseCsv, parseJsonDocs } from '$lib/shared/utils/import-parser';

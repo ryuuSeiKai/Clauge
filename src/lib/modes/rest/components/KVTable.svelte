@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import type { KVInput } from '$lib/types';
-  import EnvInput from '$lib/components/shared/EnvInput.svelte';
+  import EnvInput from '$lib/shared/primitives/EnvInput.svelte';
   import { KV_DEBOUNCE_MS, SUGGEST_CLOSE_MS } from '$lib/shared/constants/timings';
 
   let { items = [], label = 'Add item', showKeySuggestions = false, onchange }: {

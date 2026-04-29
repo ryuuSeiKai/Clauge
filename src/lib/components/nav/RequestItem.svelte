@@ -4,13 +4,13 @@
   import { appearance } from '$lib/stores/settings';
   import { activeRequestId, activeCollectionId, loadRequest, deleteRequest, collections, loadCollections } from '$lib/modes/rest/stores';
   import { tabs, activeTabId, addTab, activateTab, updateTab } from '$lib/shared/stores/tabs';
-  import { showContextMenu } from '$lib/components/shared/contextmenu';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showContextMenu } from '$lib/shared/primitives/contextmenu';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import { get } from 'svelte/store';
   import * as cmd from '$lib/commands';
   import InlineInput from './InlineInput.svelte';
-  import ConfirmDialog from '$lib/components/shared/ConfirmDialog.svelte';
+  import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
 
   interface Props {
     request: Request;

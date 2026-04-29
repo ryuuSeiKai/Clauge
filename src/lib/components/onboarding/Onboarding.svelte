@@ -53,7 +53,7 @@
               try {
                 const { githubConnectWithToken, gistCheckExists } = await import('$lib/commands/github');
                 const { setConnected, markSynced, showSyncRestorePrompt } = await import('$lib/stores/github');
-                const { showToast: toast } = await import('$lib/components/shared/toast');
+                const { showToast: toast } = await import('$lib/shared/primitives/toast');
                 const username = await githubConnectWithToken(token);
                 setConnected(username);
                 ghConnected = true;
@@ -76,7 +76,7 @@
                   markSynced();
                 }
               } catch (e: any) {
-                const { showToast } = await import('$lib/components/shared/toast');
+                const { showToast } = await import('$lib/shared/primitives/toast');
                 const { friendlyError } = await import('$lib/utils/errors');
                 showToast(friendlyError(e), 'error');
               } finally {
@@ -161,7 +161,7 @@
       // Wait for deep link callback — ghConnecting stays true
     } catch (e: any) {
       ghConnecting = false;
-      const { showToast } = await import('$lib/components/shared/toast');
+      const { showToast } = await import('$lib/shared/primitives/toast');
       const { friendlyError } = await import('$lib/utils/errors');
       showToast(friendlyError(e), 'error');
     }

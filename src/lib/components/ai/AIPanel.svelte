@@ -10,7 +10,7 @@
   import { buildSshSystemPrompt, SSH_TOOLS } from '$lib/modes/ssh/ai/prompt';
   import { activeSshProfile } from '$lib/modes/ssh/stores';
   import { redactSecrets } from '$lib/modes/ssh/ai/safety';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import type { AIMessage, ChatMessage, ChatContext, AIActionBlock } from '$lib/types/ai';

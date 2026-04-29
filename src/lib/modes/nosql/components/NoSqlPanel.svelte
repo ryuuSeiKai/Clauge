@@ -1,7 +1,7 @@
 <script lang="ts">
   import { activeNoSqlConnection, connectedNoSqlIds, nosqlLiveConnectionIds, nosqlTabState, setNoSqlTabData, nosqlConnections, activeNoSqlConnectionId, insertNoSqlQueryText, aiExecuteNoSqlQuery } from '../stores';
   import { nosqlListDatabases, nosqlListCollections as listColls } from '../commands';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { tabs, activeTabId, addTab } from '$lib/shared/stores/tabs';
   import DocumentViewer from './DocumentViewer.svelte';

@@ -7,7 +7,7 @@
   import { get } from 'svelte/store';
   import { activeTabId, tabs, markDirty, setDraft, getDraft, updateTab } from '$lib/shared/stores/tabs';
   import { parseCurl } from '$lib/modes/rest/utils/curl-parser';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import ReqEnvPill from './ReqEnvPill.svelte';
   import { tick } from 'svelte';
 

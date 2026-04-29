@@ -6,7 +6,7 @@
   import AgentNav from '$lib/modes/agent/components/AgentNav.svelte';
   import SshNav from '$lib/modes/ssh/components/SshNav.svelte';
   import HistoryPanel from './HistoryPanel.svelte';
-  import ImportExportModal from '$lib/components/shared/ImportExportModal.svelte';
+  import ImportExportModal from '$lib/shared/primitives/ImportExportModal.svelte';
   import { getNavPinned, setNavPinned } from '$lib/shared/constants/storage';
   import { AGENT_EVENT } from '$lib/shared/constants/events';
 

@@ -5,13 +5,13 @@
   import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
   import { appearance } from '$lib/stores/settings';
   import { get } from 'svelte/store';
-  import { showContextMenu } from '$lib/components/shared/contextmenu';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showContextMenu } from '$lib/shared/primitives/contextmenu';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import * as cmd from '$lib/commands';
   import RequestItem from './RequestItem.svelte';
   import InlineInput from './InlineInput.svelte';
-  import ConfirmDialog from '$lib/components/shared/ConfirmDialog.svelte';
+  import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
 
   interface Props {
     collection: Collection;

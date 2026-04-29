@@ -14,7 +14,7 @@
   import Avatar from './Avatar.svelte';
   import type { AppMode } from '$lib/stores/app';
   import { checkAndDownloadUpdate, showWhatsNewModal, whatsNewContent, updateAvailable } from '$lib/utils/updater';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { FULLSCREEN_POLL_INTERVAL_MS } from '$lib/shared/constants/timings';
 
   let profileMenuOpen = $state(false);

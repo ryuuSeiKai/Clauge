@@ -2,7 +2,7 @@
   import type { TableInfo, ColumnInfo } from '../types';
   import { sqlListTables, sqlDescribeTable, sqlListDatabases } from '../commands';
   import { activeConnection, connectedIds, getLiveId } from '../stores';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
 
   interface Props {
     oninsertquery?: (query: string) => void;

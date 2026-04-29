@@ -13,9 +13,9 @@
     openNoSqlCollection,
   } from '../stores';
   import { nosqlListDatabases, nosqlListCollections, nosqlCreateCollection, nosqlDropDatabase, nosqlDropCollection, nosqlRenameCollection } from '../commands';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
-  import { showContextMenu } from '$lib/components/shared/contextmenu';
+  import { showContextMenu } from '$lib/shared/primitives/contextmenu';
   import type { NoSqlConnection } from '../types';
 
   // SVG icon helpers (inline, 14x14, stroke-based)

@@ -3,8 +3,8 @@
   import { history, loadHistory, clearHistory, activeHistoryEntry } from '$lib/modes/rest/stores';
   import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
   import { appearance } from '$lib/stores/settings';
-  import { showToast } from '$lib/components/shared/toast';
-  import ConfirmDialog from '$lib/components/shared/ConfirmDialog.svelte';
+  import { showToast } from '$lib/shared/primitives/toast';
+  import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import type { HistoryEntry } from '$lib/types';
 
   let showClearConfirm = $state(false);

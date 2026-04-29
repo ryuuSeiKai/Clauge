@@ -12,7 +12,7 @@
   import type { TableInfo } from '../types';
   import { Parser as SqlParser } from 'node-sql-parser';
   import { splitSqlStatements } from '../utils/splitter';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
 
   interface Props {
     query: string;

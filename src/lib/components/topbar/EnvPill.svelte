@@ -2,7 +2,7 @@
   import { environments, activeEnvId, setActiveEnv } from '$lib/modes/rest/stores';
   import { activeModal } from '$lib/stores/app';
   import { derived } from 'svelte/store';
-  import Dropdown from '$lib/components/shared/Dropdown.svelte';
+  import Dropdown from '$lib/shared/primitives/Dropdown.svelte';
 
   const activeEnv = derived(
     [environments, activeEnvId],

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { redisListKeys, redisGetKey, redisSetKey, redisDeleteKey, redisExecute } from '../commands';
   import { highlightJSON } from '$lib/shared/utils/json-highlight';

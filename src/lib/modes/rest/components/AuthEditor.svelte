@@ -1,5 +1,5 @@
 <script lang="ts">
-  import EnvInput from '$lib/components/shared/EnvInput.svelte';
+  import EnvInput from '$lib/shared/primitives/EnvInput.svelte';
 
   type AuthData = {
     token?: string;

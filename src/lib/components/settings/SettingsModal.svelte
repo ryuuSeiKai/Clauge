@@ -1,9 +1,9 @@
 <script lang="ts">
-  import Modal from '$lib/components/shared/Modal.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
   import { activeModal } from '$lib/stores/app';
   import { settings, setSetting, appearance, saveAppearance } from '$lib/stores/settings';
   import { applyTheme, getThemes, getTheme } from '$lib/utils/theme';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import type { AppearanceConfig } from '$lib/types';
   import { testAiKey, getAiUsageStats, getAiProviderStats, resetAiUsage } from '$lib/commands/ai';
   import type { AiUsageStat, AiProviderStat } from '$lib/types/ai';

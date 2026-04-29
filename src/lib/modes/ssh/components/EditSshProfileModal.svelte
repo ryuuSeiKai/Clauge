@@ -1,8 +1,8 @@
 <script lang="ts">
-  import Modal from '$lib/components/shared/Modal.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
   import { sshUpdateProfile } from '../commands';
   import { loadSshProfiles } from '../stores';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import type { SshAuthType, SshProfile } from '../types';
   import { SSH_EVENT } from '$lib/shared/constants/events';
 

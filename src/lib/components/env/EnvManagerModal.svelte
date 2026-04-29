@@ -1,7 +1,7 @@
 <script lang="ts">
   import { tick, onDestroy } from 'svelte';
-  import Modal from '$lib/components/shared/Modal.svelte';
-  import ConfirmDialog from '$lib/components/shared/ConfirmDialog.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
+  import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import EnvSidebar from './EnvSidebar.svelte';
   import EnvVarTable from './EnvVarTable.svelte';
   import {
@@ -13,7 +13,7 @@
     setDefaultEnv
   } from '$lib/modes/rest/stores';
   import { activeModal } from '$lib/stores/app';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { ENV_SAVE_DEBOUNCE_MS } from '$lib/shared/constants/timings';
 
   let show = $state(false);

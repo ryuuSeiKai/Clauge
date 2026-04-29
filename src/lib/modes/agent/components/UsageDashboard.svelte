@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import Modal from '$lib/components/shared/Modal.svelte';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
   import { agentGetUsageAnalytics } from '../commands';
   import { setSetting, settings } from '$lib/stores/settings';
   import type { UsageAnalytics } from '../types';

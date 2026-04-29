@@ -1,6 +1,6 @@
 <script lang="ts">
-  import Modal from '$lib/components/shared/Modal.svelte';
-  import { showToast } from '$lib/components/shared/toast';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { nosqlTestConnection } from '../commands';
   import type { NoSqlConnection, NoSqlConnectionConfig } from '../types';

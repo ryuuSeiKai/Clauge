@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { sshProfiles, activeSshProfile, loadSshProfiles, sshTerminalIds, sshConnStates } from '../stores';
   import { sshTouchProfile, sshDeleteProfile, sshCreateProfile } from '../commands';
-  import { showContextMenu } from '$lib/components/shared/contextmenu';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showContextMenu } from '$lib/shared/primitives/contextmenu';
+  import { showToast } from '$lib/shared/primitives/toast';
   import NewSshProfileModal from './NewSshProfileModal.svelte';
   import EditSshProfileModal from './EditSshProfileModal.svelte';
   import type { SshProfile } from '../types';

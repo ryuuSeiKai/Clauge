@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import type { SqlQueryResult } from '../types';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { setSqlPending, sqlRowLimit } from '../stores';
   import { sqlExecuteQuery } from '../commands';
   import { friendlyError } from '$lib/utils/errors';

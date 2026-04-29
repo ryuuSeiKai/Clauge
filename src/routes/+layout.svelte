@@ -4,8 +4,8 @@
   import NavPanel from '$lib/components/nav/NavPanel.svelte';
   import Topbar from '$lib/components/topbar/Topbar.svelte';
   import StatusBar from '$lib/components/statusbar/StatusBar.svelte';
-  import Toast from '$lib/components/shared/Toast.svelte';
-  import ContextMenu from '$lib/components/shared/ContextMenu.svelte';
+  import Toast from '$lib/shared/primitives/Toast.svelte';
+  import ContextMenu from '$lib/shared/primitives/ContextMenu.svelte';
   import EnvManagerModal from '$lib/components/env/EnvManagerModal.svelte';
   import SettingsModal from '$lib/components/settings/SettingsModal.svelte';
   import GitHubConnect from '$lib/components/github/GitHubConnect.svelte';
@@ -19,8 +19,8 @@
   import { loadCollections, clearActiveRequest, collections } from '$lib/modes/rest/stores';
   import { loadEnvironments } from '$lib/modes/rest/stores';
   import { loadConnections as loadSqlConnections, loadSqlScripts, showSqlConnectionDialog, editingSqlConnection, handleSqlConnectionSave, showSqlDisconnectConfirm, sqlDisconnectTarget, disconnectFromDb, connections as sqlConnections } from '$lib/modes/sql/stores';
-  import { showToast } from '$lib/components/shared/toast';
-  import ConfirmDialog from '$lib/components/shared/ConfirmDialog.svelte';
+  import { showToast } from '$lib/shared/primitives/toast';
+  import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import { loadNoSqlConnections, showNoSqlConnectionDialog, editingNoSqlConnection, handleNoSqlConnectionSave, nosqlConnections } from '$lib/modes/nosql/stores';
   import SqlConnectionDialog from '$lib/modes/sql/components/ConnectionDialog.svelte';
   import NoSqlConnectionDialog from '$lib/modes/nosql/components/ConnectionDialog.svelte';
@@ -37,11 +37,11 @@
   import type { AgentSession } from '$lib/modes/agent/types';
   import { setupGlobalShortcuts, teardownGlobalShortcuts } from '$lib/utils/shortcuts';
   import { applyTheme } from '$lib/utils/theme';
-  import ShortcutsOverlay from '$lib/components/shared/ShortcutsOverlay.svelte';
-  import SaveRequestDialog from '$lib/components/shared/SaveRequestDialog.svelte';
+  import ShortcutsOverlay from '$lib/shared/primitives/ShortcutsOverlay.svelte';
+  import SaveRequestDialog from '$lib/shared/primitives/SaveRequestDialog.svelte';
   import Onboarding from '$lib/components/onboarding/Onboarding.svelte';
-  import WhatsNewModal from '$lib/components/shared/WhatsNewModal.svelte';
-  import UpdateNotification from '$lib/components/shared/UpdateNotification.svelte';
+  import WhatsNewModal from '$lib/shared/primitives/WhatsNewModal.svelte';
+  import UpdateNotification from '$lib/shared/primitives/UpdateNotification.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { get } from 'svelte/store';
   import { SSH_EVENT, AGENT_EVENT, APP_EVENT } from '$lib/shared/constants/events';

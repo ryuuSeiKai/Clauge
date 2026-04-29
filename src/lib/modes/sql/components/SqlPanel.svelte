@@ -13,7 +13,7 @@
   import { tabs, activeTabId, addTab } from '$lib/shared/stores/tabs';
   import { sqlExecuteQuery, sqlDescribeTable, sqlListSchemas } from '../commands';
   import type { TableInfo, SqlResultEntry, ColumnInfo } from '../types';
-  import { showToast } from '$lib/components/shared/toast';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { mode } from '$lib/stores/app';
   import type { SqlQueryResult, SqlConnectionConfig } from '../types';
