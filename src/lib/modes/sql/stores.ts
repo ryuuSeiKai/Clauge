@@ -179,6 +179,10 @@ export async function connectToDb(connectionId: string) {
     username: conn.username,
     password: conn.password,
     ssl: !!conn.ssl,
+    // Forward the saved SSH profile so the backend opens the tunnel.
+    // Without this the rewritten host/port (127.0.0.1:<bound>) is never
+    // applied and the driver dials the original host directly.
+    sshProfileId: conn.sshProfileId ?? null,
   });
   activeConnectionId.set(connectionId);
   connectedIds.update(s => {
@@ -264,6 +268,9 @@ export async function connectToDatabase(savedConnId: string, database: string): 
     username: conn.username,
     password: conn.password,
     ssl: !!conn.ssl,
+    // Forward the saved SSH profile so per-database pools tunnel too.
+    // The nav-expand path (loading databases/schemas/tables) lands here.
+    sshProfileId: conn.sshProfileId ?? null,
   };
 
   // Use savedId:dbName as the pool key — same format as AI's ensure_pool
