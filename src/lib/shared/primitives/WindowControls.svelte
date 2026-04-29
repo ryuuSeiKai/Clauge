@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { ensureNotFullscreen } from '$lib/shared/utils/window';
 
   let hovering = $state(false);
 
@@ -8,6 +9,7 @@
   }
 
   async function handleMinimize() {
+    await ensureNotFullscreen();
     await getCurrentWindow().minimize();
   }
 

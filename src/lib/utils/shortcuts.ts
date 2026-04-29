@@ -147,12 +147,15 @@ function handleKeydown(e: KeyboardEvent) {
     });
   }
 
-  // Cmd+M: minimize (only when not in fullscreen)
+  // Cmd+M: minimize (exits fullscreen first if needed)
   if (e.metaKey && !e.ctrlKey && e.key === 'm' && !isInput) {
     e.preventDefault();
-    import('@tauri-apps/api/window').then(({ getCurrentWindow }) => {
-      const win = getCurrentWindow();
-      win.isFullscreen().then(fs => { if (!fs) win.minimize(); });
+    Promise.all([
+      import('@tauri-apps/api/window'),
+      import('$lib/shared/utils/window'),
+    ]).then(async ([{ getCurrentWindow }, { ensureNotFullscreen }]) => {
+      await ensureNotFullscreen();
+      await getCurrentWindow().minimize();
     });
   }
 }
