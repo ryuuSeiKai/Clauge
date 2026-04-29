@@ -841,35 +841,30 @@ pub async fn sql_save_connection(
     pool: State<'_, SqlitePool>,
     config: SqlConnectionConfig,
 ) -> Result<SqlSavedConnection, String> {
+    use crate::shared::repos::sql_connections as sql_conn_repo;
     let id = Uuid::new_v4().to_string();
 
-    let max_order: (i32,) =
-        sqlx::query_as("SELECT COALESCE(MAX(sort_order), -1) FROM sql_connections")
-            .fetch_one(pool.inner())
-            .await
-            .map_err(|e| e.to_string())?;
+    let max_order = sql_conn_repo::max_sort_order(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
 
-    sqlx::query(
-        "INSERT INTO sql_connections (id, name, driver, host, port, database_name, username, password, ssl, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    sql_conn_repo::insert(
+        pool.inner(),
+        &id,
+        &config.name,
+        &config.driver,
+        &config.host,
+        config.port as i32,
+        &config.database,
+        &config.username,
+        &config.password,
+        config.ssl as i32,
+        max_order.0 + 1,
     )
-    .bind(&id)
-    .bind(&config.name)
-    .bind(&config.driver)
-    .bind(&config.host)
-    .bind(config.port as i32)
-    .bind(&config.database)
-    .bind(&config.username)
-    .bind(&config.password)
-    .bind(config.ssl as i32)
-    .bind(max_order.0 + 1)
-    .execute(pool.inner())
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, SqlSavedConnection>("SELECT * FROM sql_connections WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool.inner())
+    sql_conn_repo::get_by_id(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -878,12 +873,10 @@ pub async fn sql_save_connection(
 pub async fn sql_list_saved_connections(
     pool: State<'_, SqlitePool>,
 ) -> Result<Vec<SqlSavedConnection>, String> {
-    sqlx::query_as::<_, SqlSavedConnection>(
-        "SELECT * FROM sql_connections ORDER BY sort_order ASC",
-    )
-    .fetch_all(pool.inner())
-    .await
-    .map_err(|e| e.to_string())
+    use crate::shared::repos::sql_connections as sql_conn_repo;
+    sql_conn_repo::list_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -891,12 +884,10 @@ pub async fn sql_delete_saved_connection(
     pool: State<'_, SqlitePool>,
     id: String,
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM sql_connections WHERE id = ?")
-        .bind(&id)
-        .execute(pool.inner())
+    use crate::shared::repos::sql_connections as sql_conn_repo;
+    sql_conn_repo::delete_by_id(pool.inner(), &id)
         .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -905,25 +896,23 @@ pub async fn sql_update_saved_connection(
     id: String,
     config: SqlConnectionConfig,
 ) -> Result<SqlSavedConnection, String> {
-    sqlx::query(
-        "UPDATE sql_connections SET name = ?, driver = ?, host = ?, port = ?, database_name = ?, username = ?, password = ?, ssl = ?, updated_at = datetime('now') WHERE id = ?",
+    use crate::shared::repos::sql_connections as sql_conn_repo;
+    sql_conn_repo::update(
+        pool.inner(),
+        &id,
+        &config.name,
+        &config.driver,
+        &config.host,
+        config.port as i32,
+        &config.database,
+        &config.username,
+        &config.password,
+        config.ssl as i32,
     )
-    .bind(&config.name)
-    .bind(&config.driver)
-    .bind(&config.host)
-    .bind(config.port as i32)
-    .bind(&config.database)
-    .bind(&config.username)
-    .bind(&config.password)
-    .bind(config.ssl as i32)
-    .bind(&id)
-    .execute(pool.inner())
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, SqlSavedConnection>("SELECT * FROM sql_connections WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool.inner())
+    sql_conn_repo::get_by_id(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -938,31 +927,26 @@ pub async fn sql_save_script(
     database_name: String,
     query: String,
 ) -> Result<SqlScript, String> {
+    use crate::shared::repos::sql_connections as sql_conn_repo;
     let id = Uuid::new_v4().to_string();
 
-    let max_order: (i32,) =
-        sqlx::query_as("SELECT COALESCE(MAX(sort_order), -1) FROM sql_scripts")
-            .fetch_one(pool.inner())
-            .await
-            .map_err(|e| e.to_string())?;
+    let max_order = sql_conn_repo::max_script_sort_order(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
 
-    sqlx::query(
-        "INSERT INTO sql_scripts (id, name, connection_id, database_name, query, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?)",
+    sql_conn_repo::insert_script(
+        pool.inner(),
+        &id,
+        &name,
+        connection_id.as_deref(),
+        &database_name,
+        &query,
+        max_order.0 + 1,
     )
-    .bind(&id)
-    .bind(&name)
-    .bind(&connection_id)
-    .bind(&database_name)
-    .bind(&query)
-    .bind(max_order.0 + 1)
-    .execute(pool.inner())
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, SqlScript>("SELECT * FROM sql_scripts WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool.inner())
+    sql_conn_repo::get_script_by_id(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -971,12 +955,10 @@ pub async fn sql_save_script(
 pub async fn sql_list_scripts(
     pool: State<'_, SqlitePool>,
 ) -> Result<Vec<SqlScript>, String> {
-    sqlx::query_as::<_, SqlScript>(
-        "SELECT * FROM sql_scripts ORDER BY sort_order ASC",
-    )
-    .fetch_all(pool.inner())
-    .await
-    .map_err(|e| e.to_string())
+    use crate::shared::repos::sql_connections as sql_conn_repo;
+    sql_conn_repo::list_scripts(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -987,20 +969,12 @@ pub async fn sql_update_script(
     query: String,
     database_name: Option<String>,
 ) -> Result<SqlScript, String> {
-    sqlx::query(
-        "UPDATE sql_scripts SET name = ?, query = ?, database_name = COALESCE(?, database_name), updated_at = datetime('now') WHERE id = ?",
-    )
-    .bind(&name)
-    .bind(&query)
-    .bind(&database_name)
-    .bind(&id)
-    .execute(pool.inner())
-    .await
-    .map_err(|e| e.to_string())?;
+    use crate::shared::repos::sql_connections as sql_conn_repo;
+    sql_conn_repo::update_script(pool.inner(), &id, &name, &query, database_name.as_deref())
+        .await
+        .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, SqlScript>("SELECT * FROM sql_scripts WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool.inner())
+    sql_conn_repo::get_script_by_id(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -1010,10 +984,8 @@ pub async fn sql_delete_script(
     pool: State<'_, SqlitePool>,
     id: String,
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM sql_scripts WHERE id = ?")
-        .bind(&id)
-        .execute(pool.inner())
+    use crate::shared::repos::sql_connections as sql_conn_repo;
+    sql_conn_repo::delete_script(pool.inner(), &id)
         .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
 }

@@ -842,36 +842,32 @@ pub async fn nosql_save_connection(
     pool: State<'_, SqlitePool>,
     config: NoSqlConnectionConfig,
 ) -> Result<NoSqlConnection, String> {
+    use crate::shared::repos::nosql_connections as nosql_repo;
     let id = Uuid::new_v4().to_string();
 
-    let max_order: (i32,) =
-        sqlx::query_as("SELECT COALESCE(MAX(sort_order), -1) FROM nosql_connections")
-            .fetch_one(pool.inner())
-            .await
-            .map_err(|e| e.to_string())?;
+    let max_order = nosql_repo::max_sort_order(pool.inner())
+        .await
+        .map_err(|e| e.to_string())?;
 
-    sqlx::query(
-        "INSERT INTO nosql_connections (id, name, driver, connection_string, host, port, database_name, username, password, ssl, direct_connection, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    nosql_repo::insert(
+        pool.inner(),
+        &id,
+        &config.name,
+        &config.driver,
+        &config.connection_string,
+        &config.host,
+        config.port as i32,
+        config.database.as_deref().unwrap_or(""),
+        config.username.as_deref().unwrap_or(""),
+        config.password.as_deref().unwrap_or(""),
+        if config.ssl { 1 } else { 0 },
+        if config.direct_connection { 1 } else { 0 },
+        max_order.0 + 1,
     )
-    .bind(&id)
-    .bind(&config.name)
-    .bind(&config.driver)
-    .bind(&config.connection_string)
-    .bind(&config.host)
-    .bind(config.port as i32)
-    .bind(config.database.as_deref().unwrap_or(""))
-    .bind(config.username.as_deref().unwrap_or(""))
-    .bind(config.password.as_deref().unwrap_or(""))
-    .bind(if config.ssl { 1 } else { 0 })
-    .bind(if config.direct_connection { 1 } else { 0 })
-    .bind(max_order.0 + 1)
-    .execute(pool.inner())
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, NoSqlConnection>("SELECT * FROM nosql_connections WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool.inner())
+    nosql_repo::get_by_id(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
@@ -880,12 +876,10 @@ pub async fn nosql_save_connection(
 pub async fn nosql_list_saved_connections(
     pool: State<'_, SqlitePool>,
 ) -> Result<Vec<NoSqlConnection>, String> {
-    sqlx::query_as::<_, NoSqlConnection>(
-        "SELECT * FROM nosql_connections ORDER BY sort_order ASC",
-    )
-    .fetch_all(pool.inner())
-    .await
-    .map_err(|e| e.to_string())
+    use crate::shared::repos::nosql_connections as nosql_repo;
+    nosql_repo::list_all(pool.inner())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -893,12 +887,10 @@ pub async fn nosql_delete_saved_connection(
     pool: State<'_, SqlitePool>,
     id: String,
 ) -> Result<(), String> {
-    sqlx::query("DELETE FROM nosql_connections WHERE id = ?")
-        .bind(&id)
-        .execute(pool.inner())
+    use crate::shared::repos::nosql_connections as nosql_repo;
+    nosql_repo::delete_by_id(pool.inner(), &id)
         .await
-        .map_err(|e| e.to_string())?;
-    Ok(())
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -907,27 +899,25 @@ pub async fn nosql_update_saved_connection(
     id: String,
     config: NoSqlConnectionConfig,
 ) -> Result<NoSqlConnection, String> {
-    sqlx::query(
-        "UPDATE nosql_connections SET name = ?, driver = ?, connection_string = ?, host = ?, port = ?, database_name = ?, username = ?, password = ?, ssl = ?, direct_connection = ?, updated_at = datetime('now') WHERE id = ?",
+    use crate::shared::repos::nosql_connections as nosql_repo;
+    nosql_repo::update(
+        pool.inner(),
+        &id,
+        &config.name,
+        &config.driver,
+        &config.connection_string,
+        &config.host,
+        config.port as i32,
+        config.database.as_deref().unwrap_or(""),
+        config.username.as_deref().unwrap_or(""),
+        config.password.as_deref().unwrap_or(""),
+        if config.ssl { 1 } else { 0 },
+        if config.direct_connection { 1 } else { 0 },
     )
-    .bind(&config.name)
-    .bind(&config.driver)
-    .bind(&config.connection_string)
-    .bind(&config.host)
-    .bind(config.port as i32)
-    .bind(config.database.as_deref().unwrap_or(""))
-    .bind(config.username.as_deref().unwrap_or(""))
-    .bind(config.password.as_deref().unwrap_or(""))
-    .bind(if config.ssl { 1 } else { 0 })
-    .bind(if config.direct_connection { 1 } else { 0 })
-    .bind(&id)
-    .execute(pool.inner())
     .await
     .map_err(|e| e.to_string())?;
 
-    sqlx::query_as::<_, NoSqlConnection>("SELECT * FROM nosql_connections WHERE id = ?")
-        .bind(&id)
-        .fetch_one(pool.inner())
+    nosql_repo::get_by_id(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
 }
