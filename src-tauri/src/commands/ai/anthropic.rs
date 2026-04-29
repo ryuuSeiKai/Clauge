@@ -9,10 +9,7 @@ use super::tools::execute_tool;
 use super::types::ChatContext;
 use crate::modes::sql::client::SqlConnectionManager;
 use crate::modes::nosql::client::NoSqlConnections;
-
-pub const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
-pub const ANTHROPIC_VERSION: &str = "2023-06-01";
-pub const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
+use crate::shared::ai::ProviderConfig;
 
 pub async fn stream_anthropic(
     client: &reqwest::Client,
@@ -24,6 +21,7 @@ pub async fn stream_anthropic(
     session_id: &str,
     system_prompt: &str,
     tools: &[serde_json::Value],
+    config: &ProviderConfig,
     sql_manager: &Arc<SqlConnectionManager>,
     nosql_conns: &NoSqlConnections,
 ) -> Result<(), String> {
@@ -32,26 +30,39 @@ pub async fn stream_anthropic(
     let mut tool_rounds: u32 = 0;
     const MAX_TOOL_ROUNDS: u32 = 10;
 
+    let anthropic_version = config.anthropic_version.unwrap_or("2023-06-01");
+
     loop {
         let mut tools_with_cache = tools.to_vec();
-        if let Some(last_tool) = tools_with_cache.last_mut() {
-            if let Some(obj) = last_tool.as_object_mut() {
-                obj.insert(
-                    "cache_control".to_string(),
-                    serde_json::json!({"type": "ephemeral"}),
-                );
+        if config.supports_caching {
+            if let Some(last_tool) = tools_with_cache.last_mut() {
+                if let Some(obj) = last_tool.as_object_mut() {
+                    obj.insert(
+                        "cache_control".to_string(),
+                        serde_json::json!({"type": "ephemeral"}),
+                    );
+                }
             }
         }
 
-        let body = serde_json::json!({
-            "model": DEFAULT_MODEL,
-            "max_tokens": 4096,
-            "stream": true,
-            "system": [{
+        let system_block = if config.supports_caching {
+            serde_json::json!([{
                 "type": "text",
                 "text": system_prompt,
                 "cache_control": {"type": "ephemeral"}
-            }],
+            }])
+        } else {
+            serde_json::json!([{
+                "type": "text",
+                "text": system_prompt,
+            }])
+        };
+
+        let body = serde_json::json!({
+            "model": config.model_id,
+            "max_tokens": config.max_output_tokens,
+            "stream": true,
+            "system": system_block,
             "tools": tools_with_cache,
             "messages": conversation_msgs,
         });
@@ -63,12 +74,12 @@ pub async fn stream_anthropic(
         );
         headers.insert(
             "anthropic-version",
-            HeaderValue::from_static(ANTHROPIC_VERSION),
+            HeaderValue::from_str(anthropic_version).map_err(|e| e.to_string())?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let response = client
-            .post(ANTHROPIC_API_URL)
+            .post(config.api_url)
             .headers(headers)
             .json(&body)
             .send()

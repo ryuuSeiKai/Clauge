@@ -9,27 +9,7 @@ use super::tools::execute_tool;
 use super::types::ChatContext;
 use crate::modes::sql::client::SqlConnectionManager;
 use crate::modes::nosql::client::NoSqlConnections;
-
-pub const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
-pub const GROQ_DEFAULT_MODEL: &str = "meta-llama/llama-4-scout-17b-16e-instruct";
-
-pub const MISTRAL_API_URL: &str = "https://api.mistral.ai/v1/chat/completions";
-pub const MISTRAL_DEFAULT_MODEL: &str = "mistral-large-latest";
-
-pub const OPENAI_GH_API_URL: &str = "https://models.inference.ai.azure.com/chat/completions";
-pub const OPENAI_GH_DEFAULT_MODEL: &str = "gpt-4.1-mini";
-
-pub const NVIDIA_API_URL: &str = "https://integrate.api.nvidia.com/v1/chat/completions";
-pub const NVIDIA_DEFAULT_MODEL: &str = "nvidia/nemotron-3-super-120b-a12b";
-
-pub const OPENROUTER_API_URL: &str = "https://openrouter.ai/api/v1/chat/completions";
-pub const OPENROUTER_DEFAULT_MODEL: &str = "meta-llama/llama-3.3-70b-instruct:free";
-
-pub const OPENAI_API_URL: &str = "https://api.openai.com/v1/chat/completions";
-pub const OPENAI_DEFAULT_MODEL: &str = "gpt-4.1-mini";
-
-pub const GEMINI_API_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
-pub const GEMINI_DEFAULT_MODEL: &str = "gemini-2.5-flash";
+use crate::shared::ai::ProviderConfig;
 
 pub async fn stream_openai(
     client: &reqwest::Client,
@@ -41,8 +21,7 @@ pub async fn stream_openai(
     session_id: &str,
     system_prompt: &str,
     tools: &[serde_json::Value],
-    api_url: &str,
-    model: &str,
+    config: &ProviderConfig,
     sql_manager: &Arc<SqlConnectionManager>,
     nosql_conns: &NoSqlConnections,
 ) -> Result<(), String> {
@@ -119,19 +98,25 @@ pub async fn stream_openai(
     let mut tool_rounds: u32 = 0;
     const MAX_TOOL_ROUNDS: u32 = 10;
 
+    // Reduced output cap when tools aren't needed: legacy heuristic.
+    // 1024 was the original "no-tool" cap; preserved verbatim for parity.
+    let no_tool_max_tokens: u32 = 1024.min(config.max_output_tokens);
+
     loop {
         let mut body = serde_json::json!({
-            "model": model,
-            "max_tokens": if needs_tools { 4096 } else { 1024 },
+            "model": config.model_id,
+            "max_tokens": if needs_tools { config.max_output_tokens } else { no_tool_max_tokens },
             "stream": true,
-            "temperature": 0.1,
+            "temperature": config.default_temperature,
             "messages": full_msgs,
         });
 
         if needs_tools && !openai_tools.is_empty() {
             body["tools"] = serde_json::json!(openai_tools);
             body["tool_choice"] = serde_json::json!("auto");
-            body["parallel_tool_calls"] = serde_json::json!(true);
+            if config.supports_parallel_tools {
+                body["parallel_tool_calls"] = serde_json::json!(true);
+            }
         }
 
         let mut headers = HeaderMap::new();
@@ -141,10 +126,10 @@ pub async fn stream_openai(
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        log::info!("[AI OpenAI] POST {} model={}", api_url, model);
+        log::info!("[AI OpenAI] POST {} model={}", config.api_url, config.model_id);
 
         let response = client
-            .post(api_url)
+            .post(config.api_url)
             .headers(headers)
             .json(&body)
             .send()

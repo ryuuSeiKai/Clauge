@@ -15,24 +15,33 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::modes::sql::client::SqlConnectionManager;
 use crate::modes::nosql::client::NoSqlConnections;
-
-use self::anthropic::{ANTHROPIC_API_URL, ANTHROPIC_VERSION, DEFAULT_MODEL};
-use self::context::build_api_messages;
-use self::openai::{
-    GROQ_API_URL, GROQ_DEFAULT_MODEL,
-    MISTRAL_API_URL, MISTRAL_DEFAULT_MODEL,
-    OPENAI_GH_API_URL, OPENAI_GH_DEFAULT_MODEL,
-    NVIDIA_API_URL, NVIDIA_DEFAULT_MODEL,
-    OPENROUTER_API_URL, OPENROUTER_DEFAULT_MODEL,
-    OPENAI_API_URL, OPENAI_DEFAULT_MODEL,
-    GEMINI_API_URL, GEMINI_DEFAULT_MODEL,
+use crate::shared::ai::{
+    default_model_for, get_provider_config, ApiKind, ProviderConfig, ProviderId,
 };
+
+use self::context::build_api_messages;
+
+/// Look up the registry entry for a frontend-supplied provider slug, falling
+/// back to the provider's default model when no model is specified.
+///
+/// Centralised here so `test_ai_key` and `ai_chat` resolve identically.
+fn resolve_config(
+    provider_slug: &str,
+    model: Option<&str>,
+) -> Result<&'static ProviderConfig, String> {
+    let provider = ProviderId::from_slug(provider_slug)
+        .ok_or_else(|| format!("Unknown AI provider: {}", provider_slug))?;
+    let cfg = match model {
+        Some(m) => get_provider_config(provider, m).or_else(|| default_model_for(provider)),
+        None => default_model_for(provider),
+    };
+    cfg.ok_or_else(|| format!("No registered model for provider: {}", provider_slug))
+}
 
 /// Helper to test an OpenAI-compatible API key (Groq, Mistral, etc.)
 async fn test_openai_key(
     api_key: &str,
-    api_url: &str,
-    model: &str,
+    config: &ProviderConfig,
 ) -> Result<String, String> {
     let client = reqwest::Client::new();
     let mut headers = HeaderMap::new();
@@ -43,13 +52,13 @@ async fn test_openai_key(
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
     let body = serde_json::json!({
-        "model": model,
+        "model": config.model_id,
         "max_tokens": 10,
         "messages": [{"role": "user", "content": "Hi"}]
     });
 
     let response = client
-        .post(api_url)
+        .post(config.api_url)
         .headers(headers)
         .json(&body)
         .send()
@@ -80,94 +89,84 @@ async fn test_openai_key(
     }
 }
 
+/// Helper to test an Anthropic /v1/messages key.
+async fn test_anthropic_key(
+    api_key: &str,
+    config: &ProviderConfig,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-api-key",
+        HeaderValue::from_str(api_key).map_err(|e| e.to_string())?,
+    );
+    headers.insert(
+        "anthropic-version",
+        HeaderValue::from_str(config.anthropic_version.unwrap_or("2023-06-01"))
+            .map_err(|e| e.to_string())?,
+    );
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+
+    let body = serde_json::json!({
+        "model": config.model_id,
+        "max_tokens": 10,
+        "messages": [{"role": "user", "content": "Hi"}]
+    });
+
+    let response = client
+        .post(config.api_url)
+        .headers(headers)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("Connection failed: {}", e))?;
+
+    let status = response.status();
+    if status.is_success() {
+        Ok("Connected successfully".to_string())
+    } else {
+        let error_body: String = response.text().await.unwrap_or_default();
+        let msg = match status.as_u16() {
+            401 => "Invalid API key — please check and try again".to_string(),
+            403 => "Access denied — your API key may not have permission".to_string(),
+            429 => "Rate limited — please try again in a moment".to_string(),
+            _ => {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&error_body) {
+                    parsed["error"]["message"]
+                        .as_str()
+                        .unwrap_or("Unknown error")
+                        .to_string()
+                } else {
+                    format!("API error ({})", status.as_u16())
+                }
+            }
+        };
+        Err(msg)
+    }
+}
+
 #[tauri::command]
 pub async fn test_ai_key(api_key: String, provider: String) -> Result<String, String> {
-    match provider.as_str() {
-        "groq" => {
-            if !api_key.starts_with("gsk_") {
-                return Err("Invalid key format — Groq API keys start with 'gsk_'".to_string());
-            }
-            test_openai_key(&api_key, GROQ_API_URL, GROQ_DEFAULT_MODEL).await
-        }
-        "mistral" => {
-            test_openai_key(&api_key, MISTRAL_API_URL, MISTRAL_DEFAULT_MODEL).await
-        }
-        "openai_gh" => {
-            test_openai_key(&api_key, OPENAI_GH_API_URL, OPENAI_GH_DEFAULT_MODEL).await
-        }
-        "nvidia" => {
-            test_openai_key(&api_key, NVIDIA_API_URL, NVIDIA_DEFAULT_MODEL).await
-        }
-        "openrouter" => {
-            test_openai_key(&api_key, OPENROUTER_API_URL, OPENROUTER_DEFAULT_MODEL).await
-        }
-        "openai_direct" => {
-            if !api_key.starts_with("sk-") {
-                return Err("Invalid key format — OpenAI API keys start with 'sk-'".to_string());
-            }
-            test_openai_key(&api_key, OPENAI_API_URL, OPENAI_DEFAULT_MODEL).await
-        }
-        "gemini" => {
-            test_openai_key(&api_key, GEMINI_API_URL, GEMINI_DEFAULT_MODEL).await
-        }
-        _ => {
-            // Claude (default)
-            if !api_key.starts_with("sk-ant-") {
-                return Err(
-                    "Invalid key format — Claude API keys start with 'sk-ant-'".to_string(),
-                );
-            }
+    let config = resolve_config(&provider, None)?;
 
-            let client = reqwest::Client::new();
-            let mut headers = HeaderMap::new();
-            headers.insert(
-                "x-api-key",
-                HeaderValue::from_str(&api_key).map_err(|e| e.to_string())?,
-            );
-            headers.insert(
-                "anthropic-version",
-                HeaderValue::from_static(ANTHROPIC_VERSION),
-            );
-            headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-
-            let body = serde_json::json!({
-                "model": DEFAULT_MODEL,
-                "max_tokens": 10,
-                "messages": [{"role": "user", "content": "Hi"}]
-            });
-
-            let response = client
-                .post(ANTHROPIC_API_URL)
-                .headers(headers)
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| format!("Connection failed: {}", e))?;
-
-            let status = response.status();
-            if status.is_success() {
-                Ok("Connected successfully".to_string())
-            } else {
-                let error_body: String = response.text().await.unwrap_or_default();
-                let msg = match status.as_u16() {
-                    401 => "Invalid API key — please check and try again".to_string(),
-                    403 => "Access denied — your API key may not have permission".to_string(),
-                    429 => "Rate limited — please try again in a moment".to_string(),
-                    _ => {
-                        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&error_body)
-                        {
-                            parsed["error"]["message"]
-                                .as_str()
-                                .unwrap_or("Unknown error")
-                                .to_string()
-                        } else {
-                            format!("API error ({})", status.as_u16())
-                        }
-                    }
-                };
-                Err(msg)
-            }
+    if let Some(prefix) = config.key_prefix {
+        if !api_key.starts_with(prefix) {
+            let label = match config.provider_id {
+                ProviderId::Claude => "Claude",
+                ProviderId::Groq => "Groq",
+                ProviderId::OpenAI => "OpenAI",
+                _ => provider.as_str(),
+            };
+            return Err(format!(
+                "Invalid key format — {} API keys start with '{}'",
+                label, prefix
+            ));
         }
+    }
+
+    match config.api_kind {
+        ApiKind::AnthropicMessages => test_anthropic_key(&api_key, config).await,
+        ApiKind::OpenAICompat => test_openai_key(&api_key, config).await,
     }
 }
 
@@ -190,77 +189,31 @@ pub async fn ai_chat(
     let sql_mgr = sql_manager.inner().clone();
     let nosql_mgr = nosql_connections.inner().clone();
 
-    match provider.as_str() {
-        "claude" => {
-            anthropic::stream_anthropic(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "groq" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                GROQ_API_URL, GROQ_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "mistral" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                MISTRAL_API_URL, MISTRAL_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "openai_gh" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                OPENAI_GH_API_URL, OPENAI_GH_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "nvidia" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                NVIDIA_API_URL, NVIDIA_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "openrouter" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                OPENROUTER_API_URL, OPENROUTER_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "openai_direct" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                OPENAI_API_URL, OPENAI_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        "gemini" => {
-            openai::stream_openai(
-                &client, &app, pool.inner(), &api_key, conversation_msgs,
-                &context, &session_id, &system_prompt, &tools,
-                GEMINI_API_URL, GEMINI_DEFAULT_MODEL, &sql_mgr, &nosql_mgr,
-            )
-            .await
-        }
-        unknown => {
-            let msg = format!("Unknown AI provider: {}", unknown);
+    let config = match resolve_config(&provider, None) {
+        Ok(cfg) => cfg,
+        Err(msg) => {
             let _ = app.emit(
                 &format!("ai:error:{}", session_id),
                 serde_json::json!({"error": msg}),
             );
             return Err(msg);
+        }
+    };
+
+    match config.api_kind {
+        ApiKind::AnthropicMessages => {
+            anthropic::stream_anthropic(
+                &client, &app, pool.inner(), &api_key, conversation_msgs,
+                &context, &session_id, &system_prompt, &tools, config, &sql_mgr, &nosql_mgr,
+            )
+            .await
+        }
+        ApiKind::OpenAICompat => {
+            openai::stream_openai(
+                &client, &app, pool.inner(), &api_key, conversation_msgs,
+                &context, &session_id, &system_prompt, &tools, config, &sql_mgr, &nosql_mgr,
+            )
+            .await
         }
     }
 }
