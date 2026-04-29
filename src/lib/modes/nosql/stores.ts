@@ -156,6 +156,11 @@ export async function connectToNoSql(id: string): Promise<string> {
     password: conn.password || undefined,
     ssl: !!conn.ssl,
     directConnection: !!conn.directConnection,
+    // Forward the saved SSH profile so the backend opens the tunnel and
+    // rewrites host/port (and the connection string) before handing the
+    // URI to the Mongo / Redis driver. Without this the driver dials the
+    // original host directly.
+    sshProfileId: conn.sshProfileId ?? null,
   });
   connectedNoSqlIds.update((s) => {
     const next = new Set(s);
