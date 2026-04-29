@@ -28,6 +28,11 @@
     USAGE_DANGER,
     USAGE_WARN,
   } from '$lib/shared/constants/colors';
+  import {
+    PROVIDERS as AI_PROVIDER_REGISTRY,
+    getDefaultModelFor,
+    type ProviderId,
+  } from '$lib/shared/ai/providers';
 
   type SettingsTab = 'general' | 'appearance' | 'ai' | 'agent' | 'proxy' | 'shortcuts' | 'about';
 
@@ -77,18 +82,14 @@
   let aiProviderStats = $state<AiProviderStat[]>([]);
   let showResetConfirm = $state(false);
 
-  const AI_PROVIDERS: Record<string, { name: string; model: string; modelId: string; keyPrefix: string; keyPlaceholder: string; keyUrl: string }> = {
-    claude: { name: 'Claude (Anthropic)', model: 'Haiku 4.5', modelId: 'claude-haiku-4-5-20251001', keyPrefix: 'sk-ant-', keyPlaceholder: 'sk-ant-api03-...', keyUrl: 'https://console.anthropic.com' },
-    groq: { name: 'Groq', model: 'Llama 4 Scout 17B', modelId: 'meta-llama/llama-4-scout-17b-16e-instruct', keyPrefix: 'gsk_', keyPlaceholder: 'gsk_...', keyUrl: 'https://console.groq.com/keys' },
-    mistral: { name: 'Mistral AI', model: 'Mistral Large 3', modelId: 'mistral-large-latest', keyPrefix: '', keyPlaceholder: 'API key...', keyUrl: 'https://console.mistral.ai/api-keys' },
-    openai_gh: { name: 'OpenAI (GitHub)', model: 'GPT-4.1 Mini', modelId: 'gpt-4.1-mini', keyPrefix: '', keyPlaceholder: 'GitHub token...', keyUrl: 'https://github.com/marketplace/models' },
-    nvidia: { name: 'NVIDIA NIM', model: 'Nemotron 3 Super 120B', modelId: 'nvidia/nemotron-3-super-120b-a12b', keyPrefix: '', keyPlaceholder: 'API key...', keyUrl: 'https://build.nvidia.com' },
-    openrouter: { name: 'OpenRouter', model: 'Llama 3.3 70B', modelId: 'meta-llama/llama-3.3-70b-instruct:free', keyPrefix: '', keyPlaceholder: 'sk-or-...', keyUrl: 'https://openrouter.ai/keys' },
-    openai_direct: { name: 'OpenAI', model: 'GPT-4.1 Mini', modelId: 'gpt-4.1-mini', keyPrefix: 'sk-', keyPlaceholder: 'sk-...', keyUrl: 'https://platform.openai.com/api-keys' },
-    gemini: { name: 'Google Gemini', model: 'Gemini 2.5 Flash', modelId: 'gemini-2.5-flash', keyPrefix: '', keyPlaceholder: 'API key...', keyUrl: 'https://aistudio.google.com/apikey' },
-  };
-
-  let currentProviderConfig = $derived(AI_PROVIDERS[aiProvider]);
+  // Provider/model metadata is sourced from the shared registry mirror
+  // (`$lib/shared/ai/providers`) so this component and the Rust backend
+  // stay in lockstep. Adding a provider/model is one entry there, zero
+  // edits here.
+  const FALLBACK_PROVIDER_CONFIG = AI_PROVIDER_REGISTRY[0];
+  let currentProviderConfig = $derived(
+    getDefaultModelFor(aiProvider as ProviderId) ?? FALLBACK_PROVIDER_CONFIG
+  );
   let aiHasKey = $derived(!!$settings[`ai_api_key_${aiProvider}`]?.trim());
 
   // --- Appearance ---
@@ -642,19 +643,14 @@
               <div class="ai-cfg-field">
                 <label class="ai-cfg-label">Provider</label>
                 <select class="ai-cfg-select" value={aiProvider} onchange={(e) => handleProviderChange(e.currentTarget.value)}>
-                  <option value="claude">Claude (Anthropic)</option>
-                  <option value="groq">Groq</option>
-                  <option value="mistral">Mistral AI</option>
-                  <option value="openai_gh">OpenAI (GitHub)</option>
-                  <option value="nvidia">NVIDIA NIM</option>
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="openai_direct">OpenAI</option>
-                  <option value="gemini">Google Gemini</option>
+                  {#each AI_PROVIDER_REGISTRY as p (p.providerId)}
+                    <option value={p.providerId}>{p.providerLabel}</option>
+                  {/each}
                 </select>
               </div>
               <div class="ai-cfg-field">
                 <label class="ai-cfg-label">Model</label>
-                <span class="ai-model-tag">{currentProviderConfig.model}</span>
+                <span class="ai-model-tag">{currentProviderConfig.modelLabel}</span>
               </div>
             </div>
 
