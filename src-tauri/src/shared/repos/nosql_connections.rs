@@ -1,6 +1,6 @@
 use sqlx::SqlitePool;
 
-use crate::commands::nosql_client::NoSqlConnection;
+use crate::modes::nosql::client::NoSqlConnection;
 
 pub async fn list_all(pool: &SqlitePool) -> Result<Vec<NoSqlConnection>, sqlx::Error> {
     sqlx::query_as::<_, NoSqlConnection>(

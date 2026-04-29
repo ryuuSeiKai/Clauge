@@ -3,7 +3,6 @@ pub mod usage;
 pub mod context;
 pub mod tools;
 pub mod tools_sql;
-pub mod tools_nosql;
 pub mod anthropic;
 pub mod openai;
 
@@ -16,7 +15,7 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter, State};
 
 use super::sql_client::SqlConnectionManager;
-use super::nosql_client::NoSqlConnections;
+use crate::modes::nosql::client::NoSqlConnections;
 
 use self::anthropic::{ANTHROPIC_API_URL, ANTHROPIC_VERSION, DEFAULT_MODEL};
 use self::context::build_api_messages;

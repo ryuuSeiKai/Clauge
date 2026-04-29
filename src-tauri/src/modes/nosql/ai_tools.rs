@@ -3,8 +3,8 @@ use sqlx::SqlitePool;
 use tauri::{AppHandle, Emitter};
 use tokio_stream::StreamExt;
 
-use super::types::ChatContext;
-use crate::commands::nosql_client::NoSqlConnections;
+use crate::commands::ai::types::ChatContext;
+use super::client::NoSqlConnections;
 
 /// Parse a Redis command string respecting quoted arguments.
 /// e.g. `SET key "hello world"` → ["SET", "key", "hello world"]
@@ -114,7 +114,7 @@ pub async fn execute_nosql_tool(
             }
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
                     match client.list_database_names().await {
@@ -128,7 +128,7 @@ pub async fn execute_nosql_tool(
                         Err(e) => format!("Error listing databases: {}", e),
                     }
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(_)) => {
+                Some(super::client::NoSqlPool::Redis(_)) => {
                     "This is a Redis connection. Redis does not have named databases — use redis_list_keys or redis_execute instead.".to_string()
                 }
                 None => "No active connection with that ID. Use list_nosql_connections to see saved connections, then ensure the connection is active.".to_string(),
@@ -142,7 +142,7 @@ pub async fn execute_nosql_tool(
             }
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
                     match client.database(database).list_collection_names().await {
@@ -152,7 +152,7 @@ pub async fn execute_nosql_tool(
                         Err(e) => format!("Error listing collections: {}", e),
                     }
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(_)) => {
+                Some(super::client::NoSqlPool::Redis(_)) => {
                     "This is a Redis connection, not MongoDB.".to_string()
                 }
                 None => "No active connection with that ID.".to_string(),
@@ -171,7 +171,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
 
@@ -229,7 +229,7 @@ pub async fn execute_nosql_tool(
                         Err(e) => format!("Error executing find: {}", e),
                     }
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(_)) => {
+                Some(super::client::NoSqlPool::Redis(_)) => {
                     "This is a Redis connection, not MongoDB.".to_string()
                 }
                 None => "No active connection with that ID.".to_string(),
@@ -247,7 +247,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
 
@@ -266,7 +266,7 @@ pub async fn execute_nosql_tool(
                         Err(e) => format!("Error counting documents: {}", e),
                     }
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(_)) => {
+                Some(super::client::NoSqlPool::Redis(_)) => {
                     "This is a Redis connection, not MongoDB.".to_string()
                 }
                 None => "No active connection with that ID.".to_string(),
@@ -284,7 +284,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
 
@@ -338,7 +338,7 @@ pub async fn execute_nosql_tool(
                         Err(e) => format!("Error executing aggregation: {}", e),
                     }
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(_)) => {
+                Some(super::client::NoSqlPool::Redis(_)) => {
                     "This is a Redis connection, not MongoDB.".to_string()
                 }
                 None => "No active connection with that ID.".to_string(),
@@ -354,7 +354,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(cm)) => {
+                Some(super::client::NoSqlPool::Redis(cm)) => {
                     let mut conn = cm.clone();
                     drop(guard);
                     let keys: Vec<String> = redis::cmd("KEYS")
@@ -370,7 +370,7 @@ pub async fn execute_nosql_tool(
                     });
                     serde_json::to_string_pretty(&result).unwrap_or_else(|_| "[]".to_string())
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(_)) => {
+                Some(super::client::NoSqlPool::Mongo(_)) => {
                     "This is a MongoDB connection, not Redis.".to_string()
                 }
                 None => "No active connection with that ID.".to_string(),
@@ -391,7 +391,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Redis(cm)) => {
+                Some(super::client::NoSqlPool::Redis(cm)) => {
                     let mut conn = cm.clone();
                     drop(guard);
 
@@ -405,7 +405,7 @@ pub async fn execute_nosql_tool(
                         Err(e) => format!("Error: {}", e),
                     }
                 }
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(_)) => {
+                Some(super::client::NoSqlPool::Mongo(_)) => {
                     "This is a MongoDB connection, not Redis.".to_string()
                 }
                 None => "No active connection with that ID.".to_string(),
@@ -433,7 +433,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
                     let coll = client.database(database).collection::<Document>(collection);
@@ -487,7 +487,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
                     let coll = client.database(database).collection::<Document>(collection);
@@ -524,7 +524,7 @@ pub async fn execute_nosql_tool(
 
             let guard = nosql_conns.lock().await;
             match guard.get(connection_id) {
-                Some(crate::commands::nosql_client::NoSqlPool::Mongo(client)) => {
+                Some(super::client::NoSqlPool::Mongo(client)) => {
                     let client = client.clone();
                     drop(guard);
                     let db = client.database(database);

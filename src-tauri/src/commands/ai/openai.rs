@@ -8,7 +8,7 @@ use tokio_stream::StreamExt;
 use super::tools::execute_tool;
 use super::types::ChatContext;
 use crate::commands::sql_client::SqlConnectionManager;
-use crate::commands::nosql_client::NoSqlConnections;
+use crate::modes::nosql::client::NoSqlConnections;
 
 pub const GROQ_API_URL: &str = "https://api.groq.com/openai/v1/chat/completions";
 pub const GROQ_DEFAULT_MODEL: &str = "meta-llama/llama-4-scout-17b-16e-instruct";

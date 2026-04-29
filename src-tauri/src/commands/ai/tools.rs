@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use super::types::{ChatContext, PendingFrontendTools};
 use crate::commands::sql_client::SqlConnectionManager;
-use crate::commands::nosql_client::NoSqlConnections;
+use crate::modes::nosql::client::NoSqlConnections;
 
 /// Resolve a request identifier — if it looks like a UUID use it directly,
 /// otherwise try matching by name (case-insensitive).
@@ -850,7 +850,7 @@ async fn execute_tool_inner(
         | "find_documents" | "count_documents" | "aggregate" | "apply_nosql_query"
         | "redis_list_keys" | "redis_execute"
         | "sample_documents" | "insert_documents" | "get_collection_stats" => {
-            super::tools_nosql::execute_nosql_tool(tool_name, input, context, pool, app, session_id, nosql_conns)
+            crate::modes::nosql::ai_tools::execute_nosql_tool(tool_name, input, context, pool, app, session_id, nosql_conns)
                 .await
         }
         _ => format!("Unknown tool: {}", tool_name),

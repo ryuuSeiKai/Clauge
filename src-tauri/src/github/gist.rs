@@ -3,7 +3,7 @@ use sqlx::SqlitePool;
 use std::sync::Mutex as StdMutex;
 use tauri::State;
 
-use crate::commands::nosql_client::NoSqlConnection;
+use crate::modes::nosql::client::NoSqlConnection;
 use crate::commands::sql_client::{SqlSavedConnection, SqlScript};
 use crate::db::models::{
     Collection, EnvVariable, Environment, Request, RequestHeader, RequestParam,
