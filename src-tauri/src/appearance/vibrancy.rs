@@ -9,10 +9,21 @@ pub struct AppearanceConfig {
     pub accent_color: String,
 }
 
+/// Default theme per OS:
+/// - macOS / Windows: dark-glass (vibrancy / mica)
+/// - Linux: dark-solid (no reliable cross-distro translucency)
+fn default_theme() -> String {
+    if cfg!(target_os = "linux") {
+        "dark-solid".to_string()
+    } else {
+        "dark-glass".to_string()
+    }
+}
+
 impl Default for AppearanceConfig {
     fn default() -> Self {
         Self {
-            theme: "dark-glass".to_string(),
+            theme: default_theme(),
             accent_color: "#6366f1".to_string(),
         }
     }
@@ -37,16 +48,36 @@ pub fn apply_vibrancy(window: &tauri::WebviewWindow, material: &str) -> Result<(
         "dark" => NSVisualEffectMaterial::Dark,
         #[allow(deprecated)]
         "ultra-dark" => NSVisualEffectMaterial::UltraDark,
-        "none" => return Ok(()), // no vibrancy
-        _ => NSVisualEffectMaterial::Sidebar, // default to sidebar
+        "none" => return Ok(()),
+        _ => NSVisualEffectMaterial::Sidebar,
     };
 
     wv_apply(window, mat, None, None).map_err(|e| e.to_string())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn apply_vibrancy(window: &tauri::WebviewWindow, material: &str) -> Result<(), String> {
+    use window_vibrancy::{apply_acrylic, apply_mica, clear_acrylic, clear_mica};
+
+    if material == "none" {
+        // Best-effort clear: ignore errors if no effect was applied yet.
+        let _ = clear_mica(window);
+        let _ = clear_acrylic(window);
+        return Ok(());
+    }
+
+    // Prefer Mica (Win11). Fall back to Acrylic (Win10) if Mica isn't available.
+    if apply_mica(window, Some(true)).is_ok() {
+        return Ok(());
+    }
+    apply_acrylic(window, Some((18, 18, 18, 125))).map_err(|e| e.to_string())
+}
+
+#[cfg(target_os = "linux")]
 pub fn apply_vibrancy(_window: &tauri::WebviewWindow, _material: &str) -> Result<(), String> {
-    Ok(())
+    // No reliable cross-distro vibrancy. Caller should fall back to opaque
+    // theme; default_theme() already returns "dark-solid" on Linux.
+    Err("vibrancy unsupported on linux".to_string())
 }
 
 #[tauri::command]
@@ -100,19 +131,22 @@ pub async fn set_appearance(
             .map_err(|e| e.to_string())?;
     }
 
-    apply_vibrancy(&window, vibrancy_material)?;
+    // On Linux, vibrancy is unsupported — silently swallow the error so the
+    // user can still pick "dark-glass" without seeing a broken-looking failure.
+    // The theme just renders as opaque dark.
+    let _ = apply_vibrancy(&window, vibrancy_material);
 
     Ok(())
 }
 
-/// Get list of available themes
+/// Get list of available themes (filtered per-OS).
 #[tauri::command]
 pub async fn get_available_themes() -> Result<Vec<ThemeInfo>, String> {
-    Ok(vec![
+    let all = vec![
         ThemeInfo {
             id: "dark-glass".to_string(),
             name: "Dark Glass".to_string(),
-            description: "Translucent dark theme with macOS vibrancy".to_string(),
+            description: "Translucent dark theme with native vibrancy".to_string(),
             preview_bg: "#07070f".to_string(),
             preview_accent: "#7c5cf8".to_string(),
         },
@@ -137,7 +171,13 @@ pub async fn get_available_themes() -> Result<Vec<ThemeInfo>, String> {
             preview_bg: "#2e3440".to_string(),
             preview_accent: "#88c0d0".to_string(),
         },
-    ])
+    ];
+
+    // Linux: hide dark-glass (vibrancy is unsupported there).
+    #[cfg(target_os = "linux")]
+    let all = all.into_iter().filter(|t| t.id != "dark-glass").collect();
+
+    Ok(all)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
