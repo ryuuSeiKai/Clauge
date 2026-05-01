@@ -1,5 +1,6 @@
 import { writable } from 'svelte/store';
 import { STORAGE_KEYS } from '$lib/shared/constants/storage';
+import { supportsSelfUpdate } from '$lib/utils/platform';
 
 let updateReadyData: { version: string; body: string } | null = null;
 let pendingUpdate: any = null;
@@ -16,9 +17,15 @@ export const whatsNewContent = writable<{ version: string; body: string } | null
 /**
  * Check for updates, download if available, and set the updateAvailable store.
  * Returns update info if an update was found, null otherwise.
+ *
+ * Skips entirely on Linux deb/rpm installs — those are owned by the system
+ * package manager and would error trying to overwrite /usr/bin contents.
  */
 export async function checkAndDownloadUpdate(): Promise<{ version: string; body: string } | null> {
   try {
+    if (!(await supportsSelfUpdate())) {
+      return null;
+    }
     const { check } = await import('@tauri-apps/plugin-updater');
     const update = await check();
     if (!update) return null;

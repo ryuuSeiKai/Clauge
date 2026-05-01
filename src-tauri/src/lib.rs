@@ -260,6 +260,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            shared::platform::install_type::get_install_type,
+            shared::platform::install_type::supports_self_update,
             modes::rest::collections::list_collections,
             modes::rest::collections::create_collection,
             modes::rest::collections::update_collection,
