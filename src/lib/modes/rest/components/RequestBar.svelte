@@ -2,8 +2,7 @@
   import { activeRequest, requestEnvOverrides } from '$lib/modes/rest/stores';
   import { activeEnvId, getEffectiveEnvId } from '$lib/modes/rest/stores';
   import { getEnvVariablesForResolution } from '$lib/modes/rest/commands';
-  import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { METHOD_COLORS } from '$lib/utils/theme';
   import { get } from 'svelte/store';
   import { activeTabId, tabs, markDirty, setDraft, getDraft, updateTab } from '$lib/shared/stores/tabs';
   import { parseCurl } from '$lib/modes/rest/utils/curl-parser';
@@ -67,7 +66,7 @@
 
   const method = $derived($activeRequest?.method ?? localMethod);
   const url = $derived($activeRequest?.url ?? localUrl);
-  const activeMethodColors = $derived($appearance?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS);
+  const activeMethodColors = METHOD_COLORS;
   const methodColor = $derived(activeMethodColors[method] ?? activeMethodColors.GET);
 
   const overrideKey = $derived($activeRequest?.id ?? String($activeTabId));
@@ -487,7 +486,7 @@
       markDirty(tabId);
       onmethodchange?.(parsed.method);
 
-      const _mc = get(appearance)?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS;
+      const _mc = METHOD_COLORS;
       const newColor = _mc[parsed.method] ?? _mc.GET;
       const name = $activeRequest?.name ?? (parsed.url || 'New Request');
       updateTab(tabId, { dot: newColor.color, label: parsed.method + ' ' + name });
@@ -527,7 +526,7 @@
       setDraft(tabId, { method: newMethod });
       markDirty(tabId);
     }
-    const _mc2 = get(appearance)?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS;
+    const _mc2 = METHOD_COLORS;
     const newColor = _mc2[newMethod] ?? _mc2.GET;
     const name = $activeRequest?.name ?? (localUrl || 'New Request');
     updateTab(tabId, { dot: newColor.color, label: newMethod + ' ' + name });

@@ -1304,6 +1304,12 @@
     height: 100% !important;
     /* Scrollbar overlays content instead of taking space */
     scrollbar-gutter: auto;
+    /* xterm.css ships `background-color: #000` on the viewport (a 10+ year
+       old macOS scrollbar workaround). Without this override, every theme
+       except pure-black ones leaks black bars at the right/bottom where
+       the canvas doesn't reach. Transparent lets the wrapper's themed bg
+       (style="background:{termBg}") show through. */
+    background-color: transparent !important;
   }
   .agent-terminal-container :global(.xterm-screen) {
     height: 100% !important;
@@ -1315,6 +1321,7 @@
   .agent-shell-container :global(.xterm-viewport) {
     height: 100% !important;
     scrollbar-gutter: auto;
+    background-color: transparent !important;
   }
   .agent-shell-container :global(.xterm-screen) {
     height: 100% !important;

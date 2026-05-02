@@ -2,8 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { collections, createRequest, loadRequest } from '$lib/modes/rest/stores';
   import { getDraft, updateTab, markClean, tabs } from '$lib/shared/stores/tabs';
-  import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { METHOD_COLORS } from '$lib/utils/theme';
   import { loadCollections } from '$lib/modes/rest/stores';
 
   interface Props {
@@ -20,8 +19,7 @@
 
   const draft = $derived(getDraft(tabId));
   const method = $derived(draft?.method ?? 'GET');
-  const activeMethodColors = $derived($appearance?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS);
-  const methodColor = $derived(activeMethodColors[method] ?? activeMethodColors.GET);
+  const methodColor = $derived(METHOD_COLORS[method] ?? METHOD_COLORS.GET);
 
   // Pre-fill name from URL path when dialog opens
   $effect(() => {

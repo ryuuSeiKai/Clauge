@@ -1,14 +1,12 @@
 <script lang="ts">
   import { activeHistoryEntry } from '$lib/modes/rest/stores';
-  import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { METHOD_COLORS } from '$lib/utils/theme';
 
   type Tab = 'response' | 'request-body' | 'request-headers' | 'response-headers';
   let activeTab: Tab = $state('response');
 
   const entry = $derived($activeHistoryEntry);
-  const activeMethodColors = $derived($appearance?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS);
-  const colors = $derived(activeMethodColors[entry?.method ?? 'GET'] ?? activeMethodColors.GET);
+  const colors = $derived(METHOD_COLORS[entry?.method ?? 'GET'] ?? METHOD_COLORS.GET);
 
 
   function formatSize(bytes: number | null): string {

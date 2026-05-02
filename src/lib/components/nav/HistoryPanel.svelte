@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { history, loadHistory, clearHistory, activeHistoryEntry } from '$lib/modes/rest/stores';
-  import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { METHOD_COLORS } from '$lib/utils/theme';
   import { showToast } from '$lib/shared/primitives/toast';
   import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import type { HistoryEntry } from '$lib/types';
@@ -88,9 +87,7 @@
   {:else}
     <div class="hist-list">
       {#each $history as entry (entry.id)}
-        {@const isLight = $appearance?.theme === 'light'}
-        {@const palette = isLight ? METHOD_COLORS_LIGHT : METHOD_COLORS}
-        {@const colors = palette[entry.method] ?? (isLight ? { color: '#475569', bg: '#e2e8f0' } : { color: '#888', bg: '#1a1a1a' })}
+        {@const colors = METHOD_COLORS[entry.method] ?? { color: '#888', bg: '#1a1a1a' }}
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="hist-item" onclick={() => openHistoryEntry(entry)}>

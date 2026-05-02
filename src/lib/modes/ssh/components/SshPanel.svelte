@@ -707,7 +707,10 @@
   }
   .ssh-terminal-container.term-hidden { opacity: 0; }
   .ssh-terminal-container :global(.xterm) { height: 100% !important; padding: 0 !important; }
-  .ssh-terminal-container :global(.xterm-viewport) { height: 100% !important; scrollbar-gutter: auto; }
+  /* xterm.css hardcodes viewport background to #000 (legacy macOS scrollbar
+     workaround). Override so the wrapper's themed background shows through
+     at the canvas-cell-rounding gap on the right/bottom edges. */
+  .ssh-terminal-container :global(.xterm-viewport) { height: 100% !important; scrollbar-gutter: auto; background-color: transparent !important; }
   .ssh-terminal-container :global(.xterm-screen) { height: 100% !important; }
   .ssh-terminal-container :global(.xterm-viewport::-webkit-scrollbar) { width: 3px; }
   .ssh-terminal-container :global(.xterm-viewport::-webkit-scrollbar-track) { background: transparent; }

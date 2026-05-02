@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Request, Collection } from '$lib/types';
-  import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { METHOD_COLORS } from '$lib/utils/theme';
   import { activeRequestId, activeCollectionId, loadRequest, deleteRequest, collections, loadCollections } from '$lib/modes/rest/stores';
   import { tabs, activeTabId, addTab, activateTab, updateTab } from '$lib/shared/stores/tabs';
   import { showContextMenu } from '$lib/shared/primitives/contextmenu';
@@ -23,8 +22,7 @@
   let showDeleteConfirm = $state(false);
   let isDragging = $state(false);
 
-  const methodColors = $derived($appearance?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS);
-  const colors = $derived(methodColors[request.method] ?? { color: '#888', bg: '#1a1a1a' });
+  const colors = $derived(METHOD_COLORS[request.method] ?? { color: '#888', bg: '#1a1a1a' });
   const isActive = $derived($activeRequestId === request.id);
   const methodLabel = $derived(request.method === 'DELETE' ? 'DEL' : request.method);
 
@@ -35,7 +33,7 @@
     // Open or activate a tab for this request
     const allTabs = get(tabs);
     const existing = allTabs.find(t => t.key === request.id);
-    const tabColors = (get(appearance)?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS)[request.method] ?? { color: '#888', bg: '#1a1a1a' };
+    const tabColors = METHOD_COLORS[request.method] ?? { color: '#888', bg: '#1a1a1a' };
     if (existing) {
       updateTab(existing.id, { dot: tabColors.color });
       activateTab(existing.id);

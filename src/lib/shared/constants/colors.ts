@@ -24,11 +24,13 @@ export const ACCENT_PALETTE = [
 
 // --- Theme preview swatches (Settings → Appearance) ---
 export const THEME_PREVIEW_COLORS: Record<string, readonly string[]> = {
-  'dark-glass': ['rgba(7,7,15,0.55)', 'rgba(13,13,24,0.72)', 'rgba(19,19,32,0.82)'],
+  'dark-glass': ['rgba(15,15,25,0.55)', 'rgba(22,22,34,0.72)', 'rgba(30,30,46,0.82)'],
   'dark-solid': ['#0a0a14', '#0f0f1a', '#16162a'],
   'midnight': ['#000000', '#080808', '#0a0a0a'],
-  'nord': ['#2e3440', '#3b4252', '#353d4b'],
-  'light': ['#f0f0ec', '#f5f5f2', '#fafaf8'],
+  'rose-pine-moon': ['#232136', '#2a273f', '#393552'],
+  'carbon-grain': ['#0c0c0e', '#14141a', '#2a2a32'],
+  'crt-phosphor': ['#050805', '#0a100a', '#1a2a1a'],
+  'aurora-drift': ['#1a1245', '#1f2a55', '#3d2860'],
 };
 
 // --- Usage / status thresholds (StatusBar + SettingsModal usage tiles) ---

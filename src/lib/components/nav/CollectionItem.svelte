@@ -2,8 +2,7 @@
   import type { Collection, Request } from '$lib/types';
   import { activeCollectionId, deleteCollection, updateCollection, createRequest, loadCollections, loadRequest, collectionsRefreshTrigger } from '$lib/modes/rest/stores';
   import { tabs, addTab, activateTab } from '$lib/shared/stores/tabs';
-  import { METHOD_COLORS, METHOD_COLORS_LIGHT } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { METHOD_COLORS } from '$lib/utils/theme';
   import { get } from 'svelte/store';
   import { showContextMenu } from '$lib/shared/primitives/contextmenu';
   import { showToast } from '$lib/shared/primitives/toast';
@@ -143,8 +142,7 @@
       activeCollectionId.set(collection.id);
       await loadRequest(req.id);
       const label = `GET ${name}`;
-      const methodColors = get(appearance)?.theme === 'light' ? METHOD_COLORS_LIGHT : METHOD_COLORS;
-      const colors2 = methodColors['GET'];
+      const colors2 = METHOD_COLORS['GET'];
       addTab(label, 'rest', req.id, colors2.color);
 
       showToast('Request created', 'success');

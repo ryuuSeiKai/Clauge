@@ -165,12 +165,19 @@ pub async fn get_available_themes() -> Result<Vec<ThemeInfo>, String> {
             preview_accent: "#4f94d4".to_string(),
         },
         ThemeInfo {
-            id: "nord".to_string(),
-            name: "Nord".to_string(),
-            description: "Arctic blue-gray palette".to_string(),
-            preview_bg: "#2e3440".to_string(),
-            preview_accent: "#88c0d0".to_string(),
+            id: "rose-pine-moon".to_string(),
+            name: "Rose Pine Moon".to_string(),
+            description: "Warm pastel pinks and lavenders".to_string(),
+            preview_bg: "#232136".to_string(),
+            preview_accent: "#c4a7e7".to_string(),
         },
+        // `aurora-drift`, `carbon-grain`, and `crt-phosphor` are intentionally
+        // not registered here — they don't appear in the picker. Their JS
+        // theme entries, terminal palettes, preview swatches, and CSS rules
+        // are kept in place so anyone with one of these IDs already stored
+        // in their settings still gets it applied correctly via `applyTheme`,
+        // and so the entries can be re-surfaced later without rebuilding
+        // the palettes.
     ];
 
     // Linux: hide dark-glass (vibrancy is unsupported there).
