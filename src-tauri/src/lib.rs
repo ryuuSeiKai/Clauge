@@ -1,6 +1,8 @@
 // The workspace MCP tool list is built with a single `json!([...])`
-// invocation that has grown past the default macro recursion budget.
-// Bump just enough to fit current + near-future tools.
+// invocation in `modes/workspace/mcp/tools.rs` that exceeds the
+// default macro recursion budget. Bump just enough to fit current +
+// near-future tools. Splitting the macro across smaller helpers would
+// remove this — TODO when the tool surface grows again.
 #![recursion_limit = "256"]
 
 mod appearance;

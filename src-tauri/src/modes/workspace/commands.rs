@@ -162,7 +162,7 @@ async fn create_default_board(
 
 #[tauri::command]
 pub async fn workspace_list(pool: State<'_, SqlitePool>) -> Result<Vec<Workspace>, String> {
-    repo::list_workspaces(pool.inner())
+    repo::list_workspaces(pool.inner(), repo::Pagination::default())
         .await
         .map_err(|e| e.to_string())
 }
@@ -291,7 +291,7 @@ pub async fn workspace_note_list(
     pool: State<'_, SqlitePool>,
     workspace_id: String,
 ) -> Result<Vec<WorkspaceNote>, String> {
-    repo::list_notes_in_workspace(pool.inner(), &workspace_id)
+    repo::list_notes_in_workspace(pool.inner(), &workspace_id, repo::Pagination::default())
         .await
         .map_err(|e| e.to_string())
 }
@@ -400,7 +400,7 @@ pub async fn workspace_board_list(
     pool: State<'_, SqlitePool>,
     workspace_id: String,
 ) -> Result<Vec<WorkspaceBoard>, String> {
-    repo::list_boards_in_workspace(pool.inner(), &workspace_id)
+    repo::list_boards_in_workspace(pool.inner(), &workspace_id, repo::Pagination::default())
         .await
         .map_err(|e| e.to_string())
 }
@@ -422,7 +422,7 @@ pub async fn workspace_board_create(
     name: String,
 ) -> Result<WorkspaceBoard, String> {
     let now = now_rfc3339();
-    let existing = repo::list_boards_in_workspace(pool.inner(), &workspace_id)
+    let existing = repo::list_boards_in_workspace(pool.inner(), &workspace_id, repo::Pagination::default())
         .await
         .map_err(|e| e.to_string())?;
     let position = existing.len() as i32;
@@ -505,7 +505,7 @@ pub async fn workspace_card_list(
     pool: State<'_, SqlitePool>,
     board_id: String,
 ) -> Result<Vec<WorkspaceBoardCard>, String> {
-    repo::list_cards_in_board(pool.inner(), &board_id)
+    repo::list_cards_in_board(pool.inner(), &board_id, repo::Pagination::default())
         .await
         .map_err(|e| e.to_string())
 }

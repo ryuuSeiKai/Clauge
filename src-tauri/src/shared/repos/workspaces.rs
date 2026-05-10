@@ -111,14 +111,50 @@ fn guard_clause(guard: MutationGuard<'_>) -> String {
     s
 }
 
+/// Optional pagination tail for list queries. UI callers pass
+/// `Pagination::default()` (no limit) and get the full result set;
+/// MCP callers pass the agent-supplied `limit` + `offset` clamped
+/// to a sane max so the agent's context window can't be flooded by
+/// a list-everything call on a busy workspace.
+#[derive(Default, Clone, Copy)]
+pub struct Pagination {
+    pub limit: Option<i32>,
+    pub offset: Option<i32>,
+}
+
+/// Compose the optional `LIMIT ? OFFSET ?` tail. Caller binds the
+/// values after the WHERE-clause params when they're `Some`.
+fn pagination_clause(p: Pagination) -> String {
+    let mut s = String::new();
+    if p.limit.is_some() {
+        s.push_str(" LIMIT ?");
+        if p.offset.is_some() {
+            s.push_str(" OFFSET ?");
+        }
+    }
+    s
+}
+
 // ---------------------------------------------------------------------------
 // workspaces
 // ---------------------------------------------------------------------------
 
-pub async fn list_workspaces(pool: &SqlitePool) -> Result<Vec<Workspace>, sqlx::Error> {
-    sqlx::query_as::<_, Workspace>("SELECT * FROM workspaces ORDER BY updated_at DESC")
-        .fetch_all(pool)
-        .await
+pub async fn list_workspaces(
+    pool: &SqlitePool,
+    page: Pagination,
+) -> Result<Vec<Workspace>, sqlx::Error> {
+    let sql = format!(
+        "SELECT * FROM workspaces ORDER BY updated_at DESC{}",
+        pagination_clause(page)
+    );
+    let mut q = sqlx::query_as::<_, Workspace>(&sql);
+    if let Some(l) = page.limit {
+        q = q.bind(l);
+        if let Some(o) = page.offset {
+            q = q.bind(o);
+        }
+    }
+    q.fetch_all(pool).await
 }
 
 pub async fn get_workspace_by_id(pool: &SqlitePool, id: &str) -> Result<Workspace, sqlx::Error> {
@@ -218,13 +254,20 @@ pub async fn delete_workspace(pool: &SqlitePool, id: &str) -> Result<(), sqlx::E
 pub async fn list_notes_in_workspace(
     pool: &SqlitePool,
     workspace_id: &str,
+    page: Pagination,
 ) -> Result<Vec<WorkspaceNote>, sqlx::Error> {
-    sqlx::query_as::<_, WorkspaceNote>(
-        "SELECT * FROM workspace_notes WHERE workspace_id = ? ORDER BY updated_at DESC",
-    )
-    .bind(workspace_id)
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT * FROM workspace_notes WHERE workspace_id = ? ORDER BY updated_at DESC{}",
+        pagination_clause(page)
+    );
+    let mut q = sqlx::query_as::<_, WorkspaceNote>(&sql).bind(workspace_id);
+    if let Some(l) = page.limit {
+        q = q.bind(l);
+        if let Some(o) = page.offset {
+            q = q.bind(o);
+        }
+    }
+    q.fetch_all(pool).await
 }
 
 pub async fn get_note_by_id(pool: &SqlitePool, id: &str) -> Result<WorkspaceNote, sqlx::Error> {
@@ -335,13 +378,20 @@ pub async fn delete_note(pool: &SqlitePool, id: &str) -> Result<(), sqlx::Error>
 pub async fn list_boards_in_workspace(
     pool: &SqlitePool,
     workspace_id: &str,
+    page: Pagination,
 ) -> Result<Vec<WorkspaceBoard>, sqlx::Error> {
-    sqlx::query_as::<_, WorkspaceBoard>(
-        "SELECT * FROM workspace_boards WHERE workspace_id = ? ORDER BY position ASC, created_at ASC",
-    )
-    .bind(workspace_id)
-    .fetch_all(pool)
-    .await
+    let sql = format!(
+        "SELECT * FROM workspace_boards WHERE workspace_id = ? ORDER BY position ASC, created_at ASC{}",
+        pagination_clause(page)
+    );
+    let mut q = sqlx::query_as::<_, WorkspaceBoard>(&sql).bind(workspace_id);
+    if let Some(l) = page.limit {
+        q = q.bind(l);
+        if let Some(o) = page.offset {
+            q = q.bind(o);
+        }
+    }
+    q.fetch_all(pool).await
 }
 
 pub async fn get_board_by_id(pool: &SqlitePool, id: &str) -> Result<WorkspaceBoard, sqlx::Error> {
@@ -465,23 +515,30 @@ pub async fn insert_column(
 pub async fn list_cards_in_board(
     pool: &SqlitePool,
     board_id: &str,
+    page: Pagination,
 ) -> Result<Vec<WorkspaceBoardCard>, sqlx::Error> {
     // Fetch every card whose column belongs to this board, ordered by
     // (column.position, card.position) so the frontend can group without
     // a second pass. Comment count via correlated subquery so the kanban
     // tile can render a "💬 N" chip without a second roundtrip.
-    sqlx::query_as::<_, WorkspaceBoardCard>(
+    let sql = format!(
         "SELECT c.*, \
                 (SELECT COUNT(*) FROM workspace_card_comments cc \
                  WHERE cc.card_id = c.id) AS comment_count \
          FROM workspace_board_cards c \
          JOIN workspace_board_columns col ON col.id = c.column_id \
          WHERE col.board_id = ? \
-         ORDER BY col.position ASC, c.position ASC",
-    )
-    .bind(board_id)
-    .fetch_all(pool)
-    .await
+         ORDER BY col.position ASC, c.position ASC{}",
+        pagination_clause(page)
+    );
+    let mut q = sqlx::query_as::<_, WorkspaceBoardCard>(&sql).bind(board_id);
+    if let Some(l) = page.limit {
+        q = q.bind(l);
+        if let Some(o) = page.offset {
+            q = q.bind(o);
+        }
+    }
+    q.fetch_all(pool).await
 }
 
 #[allow(clippy::too_many_arguments)]
