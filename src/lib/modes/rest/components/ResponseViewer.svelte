@@ -104,9 +104,58 @@
     }
   }
 
+  // ── Binary / SSL detection ──────────────────────────────────────────
+
+  function getContentType(headers: [string, string][]): string {
+    return headers.find(([k]) => k.toLowerCase() === 'content-type')?.[1]?.toLowerCase() ?? '';
+  }
+
+  function isBinaryMimeType(ct: string): boolean {
+    const mime = ct.split(';')[0].trim();
+    if (!mime) return false;
+    if (mime.startsWith('text/')) return false;
+    if (['application/json','application/xml','application/javascript',
+         'application/x-www-form-urlencoded','application/ld+json',
+         'application/graphql+json','application/graphql',
+         'application/x-yaml','application/yaml',
+         'application/atom+xml','application/rss+xml'].includes(mime)) return false;
+    if (mime.startsWith('image/') || mime.startsWith('audio/') ||
+        mime.startsWith('video/') || mime.startsWith('font/')) return true;
+    if (['application/octet-stream','application/pdf','application/zip',
+         'application/gzip','application/x-gzip','application/wasm',
+         'application/x-tar','application/x-bzip2',
+         'application/x-rar-compressed','application/x-7z-compressed',
+         'application/x-msdownload'].includes(mime)) return true;
+    if (mime.startsWith('application/vnd.') &&
+        !mime.includes('+xml') && !mime.includes('+json')) return true;
+    return false;
+  }
+
+  const contentType = $derived(response ? getContentType(response.headers) : '');
+
+  // Null bytes in the body are a reliable fallback indicator of binary data
+  const isBinary = $derived(
+    response
+      ? isBinaryMimeType(contentType) || response.body.includes('\x00')
+      : false
+  );
+
+  const isSslError = $derived(
+    !!response && response.status === 0 && /^ssl-error:/i.test(response.body)
+  );
+
+  const sslReason = $derived(
+    isSslError ? (response!.body.replace(/^ssl-error:\s*/i, '') || 'Certificate verification failed') : ''
+  );
+
+  // ── Display values ──────────────────────────────────────────────────
+
   const isSuccess = $derived(response ? response.status >= 200 && response.status < 300 : false);
 
-  const prettyBody = $derived(response ? formatBody(response.body) : '');
+  // Return '' for binary/SSL so search & copy fall back to raw body cleanly
+  const prettyBody = $derived(
+    response && !isBinary && !isSslError ? formatBody(response.body) : ''
+  );
   const highlightedBody = $derived(prettyBody ? highlightJSON(prettyBody) : '');
 
   async function copyResponse() {
@@ -277,7 +326,36 @@
     <!-- Tab content -->
     {#if activeTab === 'pretty'}
       <div class="viewer" bind:this={viewerRef}>
-        {#if searchQuery}
+        {#if isSslError}
+          <div class="inline-guide ssl-guide">
+            <div class="ig-head">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+              <span>SSL certificate verification failed</span>
+            </div>
+            <p class="ig-reason">{sslReason}</p>
+            <p class="ig-text">To call APIs with self-signed or untrusted certificates, disable SSL verification in Settings:</p>
+            <ol class="ig-steps">
+              <li>Click the gear icon at the bottom of the sidebar to open <strong>Settings</strong></li>
+              <li>Select the <strong>REST</strong> tab</li>
+              <li>Toggle off <strong>SSL Verification</strong></li>
+            </ol>
+            <div class="ig-warn">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              Only disable SSL verification for trusted internal or test APIs.
+            </div>
+          </div>
+        {:else if isBinary}
+          <div class="inline-guide binary-guide">
+            <div class="ig-head">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>
+              <span>Binary content</span>
+            </div>
+            <p class="ig-text">
+              {contentType || 'application/octet-stream'} &middot; {formatSize(response.size_bytes)}
+            </p>
+            <p class="ig-hint">Switch to <strong>Raw</strong> to view the response bytes as text.</p>
+          </div>
+        {:else if searchQuery}
           {@html searchHighlightedBody}
         {:else}
           {@html highlightedBody}
@@ -285,6 +363,9 @@
       </div>
     {:else if activeTab === 'raw'}
       <div class="viewer raw" bind:this={viewerRef}>
+        {#if isBinary}
+          <div class="raw-binary-note">Binary response — bytes rendered as UTF-8 (may appear garbled)</div>
+        {/if}
         {#if searchQuery}
           {@html searchHighlightedBody}
         {:else}
@@ -565,6 +646,86 @@
     color: var(--t3);
     font-size: 12px;
     white-space: normal;
+  }
+
+  /* ── Inline guides (SSL / binary) ── */
+  .inline-guide {
+    padding: 20px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--b1);
+    margin: 4px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ssl-guide {
+    border-color: color-mix(in srgb, var(--warn, #f5a623) 30%, var(--b1));
+    background: color-mix(in srgb, var(--warn, #f5a623) 5%, transparent);
+  }
+  .binary-guide {
+    background: color-mix(in srgb, var(--acc) 4%, transparent);
+  }
+  .ig-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--t1);
+  }
+  .ssl-guide .ig-head { color: var(--warn, #f5a623); }
+  .ig-reason {
+    font-size: 11.5px;
+    font-family: var(--mono);
+    color: var(--t3);
+    margin: 0;
+    word-break: break-all;
+  }
+  .ig-text {
+    font-size: 12.5px;
+    color: var(--t2);
+    margin: 0;
+    line-height: 1.5;
+  }
+  .ig-hint {
+    font-size: 12px;
+    color: var(--t3);
+    margin: 0;
+  }
+  .ig-steps {
+    margin: 0;
+    padding-left: 20px;
+    font-size: 12.5px;
+    color: var(--t2);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .ig-steps strong { color: var(--t1); }
+  .ig-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--t3);
+    padding: 8px 10px;
+    background: color-mix(in srgb, var(--warn, #f5a623) 8%, transparent);
+    border-radius: 5px;
+    line-height: 1.4;
+  }
+  .ig-warn svg {
+    flex-shrink: 0;
+    color: var(--warn, #f5a623);
+    margin-top: 1px;
+  }
+  .raw-binary-note {
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--t4);
+    padding: 4px 8px;
+    margin-bottom: 8px;
+    border-left: 2px solid var(--b1);
+    line-height: 1.4;
   }
 
   /* Search match highlighting */

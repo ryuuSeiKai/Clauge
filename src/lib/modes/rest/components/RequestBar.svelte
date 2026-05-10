@@ -35,30 +35,37 @@
   let prevTabId = -1;
   let prevReqId = '';
 
-  // Reset local state on tab switch or when active request changes
+  // Reset local state on tab switch or when active request changes.
+  // Guards against stale $activeRequest leaking into unsaved tabs: when switching
+  // TO an unsaved tab the old saved request hasn't been cleared yet, so we must
+  // check tab.key (not just whether req is truthy) to decide which data to show.
   $effect(() => {
     const tabId = $activeTabId;
     const req = $activeRequest;
+    const tab = activeRestTab;
     const reqId = req?.id || '';
     const isTabSwitch = tabId !== prevTabId;
-    const isReqChange = reqId !== prevReqId && reqId !== '';
+    const isReqChange = reqId !== prevReqId;
 
     if (isTabSwitch || isReqChange) {
       prevTabId = tabId;
       prevReqId = reqId;
-      if (req) {
-        localMethod = req.method;
-        localUrl = req.url;
-      } else {
-        // Unsaved tab — restore from draft or reset
+
+      if (!tab?.key) {
+        // Unsaved tab — always restore from draft, never trust potentially stale activeRequest
         const draft = getDraft(tabId);
         localMethod = draft?.method || 'GET';
         localUrl = draft?.url || '';
+      } else if (req && req.id === tab.key) {
+        // Saved tab and the loaded request matches — use request data
+        localMethod = req.method;
+        localUrl = req.url;
       }
-      // Re-render editor with correct URL
+      // else: saved tab but request not yet loaded — wait; reqMatchesTab handles display
+
       if (editorEl) {
         suppressRender = true;
-        renderToEditor(req?.url ?? localUrl);
+        renderToEditor(localUrl);
         requestAnimationFrame(() => { suppressRender = false; });
       }
     }

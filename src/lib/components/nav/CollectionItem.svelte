@@ -8,6 +8,7 @@
   import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import * as cmd from '$lib/commands';
+  import { activeDrag } from '$lib/stores/drag';
   import RequestItem from './RequestItem.svelte';
   import InlineInput from './InlineInput.svelte';
   import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
@@ -222,8 +223,8 @@
     e.stopPropagation();
     isDragTargeted = false;
     if (hoverExpandTimer) { clearTimeout(hoverExpandTimer); hoverExpandTimer = null; }
-    const sourceReqId = e.dataTransfer?.getData('text/request-id');
-    const sourceCollId = e.dataTransfer?.getData('text/request-collection-id');
+    const sourceReqId = activeDrag.requestId;
+    const sourceCollId = activeDrag.collectionId;
     if (!sourceReqId || sourceCollId === collection.id) return;
     try {
       await cmd.moveRequest(sourceReqId, collection.id);
@@ -252,8 +253,8 @@
     e.stopPropagation();
     dragOverReqIndex = null;
 
-    const sourceReqId = e.dataTransfer?.getData('text/request-id');
-    const sourceCollId = e.dataTransfer?.getData('text/request-collection-id');
+    const sourceReqId = activeDrag.requestId;
+    const sourceCollId = activeDrag.collectionId;
 
     if (!sourceReqId) return;
 
@@ -292,8 +293,8 @@
 
   async function handleBodyDrop(e: DragEvent) {
     e.preventDefault();
-    const sourceReqId = e.dataTransfer?.getData('text/request-id');
-    const sourceCollId = e.dataTransfer?.getData('text/request-collection-id');
+    const sourceReqId = activeDrag.requestId;
+    const sourceCollId = activeDrag.collectionId;
     if (!sourceReqId || sourceCollId === collection.id) return;
 
     try {

@@ -48,6 +48,11 @@ export function friendlyError(err: unknown): string {
   if (msg.includes('timeout') || msg.includes('timed out')) {
     return 'Connection timed out — check your network and server';
   }
+  // Preserve the ssl-error: prefix — RestPanel uses it to trigger the retry
+  // modal and ResponseViewer uses it to show the SSL guide.
+  if (/^ssl-error:/i.test(msg)) {
+    return msg;
+  }
   if (msg.includes('SSL') || msg.includes('ssl') || msg.includes('TLS')) {
     return 'SSL connection error — check your SSL settings';
   }

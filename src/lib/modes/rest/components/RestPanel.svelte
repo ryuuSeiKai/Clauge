@@ -8,21 +8,12 @@
   import { activeEnvId, getEffectiveEnvId } from '$lib/modes/rest/stores';
   import { executeRequest, quickExecute } from '$lib/modes/rest/commands';
   import { showToast } from '$lib/shared/primitives/toast';
-  import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import { friendlyError } from '$lib/utils/errors';
   import { loadHistory } from '$lib/modes/rest/stores';
   import { mode } from '$lib/stores/app';
   import { tabs, activeTabId, getDraft, draftRequests } from '$lib/shared/stores/tabs';
-  import { setSetting } from '$lib/stores/settings';
   import type { HttpResponse } from '$lib/types';
   import { get } from 'svelte/store';
-
-  // SSL cert-error retry modal. When the Rust executor returns an
-  // "ssl-error: <reason>" the catch block routes here instead of toasting
-  // a raw error. Confirm flips Settings → REST → SSL Verification off and
-  // re-fires the original send.
-  let sslPromptShow = $state(false);
-  let sslPromptReason = $state('');
 
   // Empty state guard: matches what other mode panels do
   // (SqlPanel.activeSqlTab, NoSqlPanel.activeNoSqlTab) — render the
@@ -180,13 +171,7 @@
       loadHistory();
     } catch (e: any) {
       const errMsg = friendlyError(e);
-      const sslMatch = /^ssl-error:\s*(.+)$/.exec(errMsg);
-      if (sslMatch && get(activeTabId) === tabId) {
-        // Surface a retry modal instead of a generic error. The retry path
-        // flips the SSL verification setting off and re-fires the send.
-        sslPromptReason = sslMatch[1];
-        sslPromptShow = true;
-      } else if (get(activeTabId) === tabId) {
+      if (get(activeTabId) === tabId) {
         showToast(errMsg, 'error');
       }
       resp = {
@@ -217,18 +202,7 @@
     }
   }
 
-  async function handleSslRetryConfirm() {
-    sslPromptShow = false;
-    try {
-      await setSetting('ssl_verification', 'false');
-      showToast('SSL verification disabled. Retrying…', 'success');
-      // Fire the original send again. Settings update is awaited above so
-      // the next build_rest_http_client read sees verify=false.
-      handleSend();
-    } catch (err) {
-      showToast(`Failed to update setting: ${friendlyError(err)}`, 'error');
-    }
-  }
+
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -264,22 +238,6 @@
     </div>
   </div>
 {/if}
-
-<!-- SSL cert-error retry modal. Triggered when the Rust executor returns
-     "ssl-error: <reason>"; confirming flips Settings → REST → SSL Verification
-     off and re-fires the original send. -->
-<ConfirmDialog
-  bind:show={sslPromptShow}
-  title="Couldn't verify the server's certificate"
-  message={`${sslPromptReason}.
-
-This is usually safe for internal or self-hosted APIs but risky on the public internet — anyone on the network path could be intercepting traffic.
-
-You can disable SSL verification globally and retry. Re-enable it from Settings → REST → SSL Verification when you're done.`}
-  confirmText="Disable SSL verification & retry"
-  confirmColor="var(--warn, #f5a623)"
-  onconfirm={handleSslRetryConfirm}
-/>
 
 <style>
   .rest-empty {

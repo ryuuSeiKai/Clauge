@@ -8,6 +8,7 @@
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import { get } from 'svelte/store';
   import * as cmd from '$lib/commands';
+  import { activeDrag } from '$lib/stores/drag';
   import InlineInput from './InlineInput.svelte';
   import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
 
@@ -133,12 +134,19 @@
   function handleDragStart(e: DragEvent) {
     if (!e.dataTransfer) return;
     e.dataTransfer.effectAllowed = 'move';
+    // Keep setData for the types.includes() check in dragover handlers.
+    // Actual data is read from activeDrag because WebKit (macOS/Tauri) returns
+    // empty string for custom MIME types from getData() in the drop event.
     e.dataTransfer.setData('text/request-id', request.id);
     e.dataTransfer.setData('text/request-collection-id', request.collectionId);
+    activeDrag.requestId = request.id;
+    activeDrag.collectionId = request.collectionId;
     isDragging = true;
   }
 
   function handleDragEnd() {
+    activeDrag.requestId = '';
+    activeDrag.collectionId = '';
     isDragging = false;
   }
 </script>
