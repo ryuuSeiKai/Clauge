@@ -373,6 +373,7 @@ pub fn run() {
             modes::agent::worktree::agent_is_git_repo,
             modes::agent::worktree::agent_create_worktree,
             modes::agent::worktree::agent_remove_worktree,
+            modes::agent::worktree::agent_worktree_is_dirty,
             modes::agent::git::agent_git_status,
             modes::agent::git::agent_git_branch,
             modes::agent::git::agent_git_ahead_behind,

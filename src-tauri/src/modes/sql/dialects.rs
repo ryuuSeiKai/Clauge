@@ -15,6 +15,10 @@ pub enum SqlDialect {
     MySql,
     Sqlite,
     Clickhouse,
+    /// Cloudflare D1 — HTTPS-only serverless SQLite. Driver is
+    /// SQLite-flavoured but transport-wise mirrors ClickHouse (reqwest +
+    /// JSON envelope, no sqlx pool).
+    D1,
 }
 
 /// Registry record; some metadata fields are consumed only by the
@@ -80,6 +84,19 @@ const DIALECTS: &[SqlDialectDescriptor] = &[
         // back to PostgreSQL anyway for unknown profiles, but we make it
         // explicit here so the registry stays the source of truth.
         frontend_parser_profile: Some("PostgreSQL"),
+    },
+    SqlDialectDescriptor {
+        dialect: SqlDialect::D1,
+        key: "d1",
+        display_name: "Cloudflare D1",
+        abbreviation: "D1",
+        default_port: 0,
+        // D1 doesn't use host/port or user/pass — the connection dialog
+        // surfaces Account ID / Database ID / API Token fields instead.
+        // Both flags are false so the existing generic fields stay hidden.
+        uses_host_port: false,
+        uses_credentials: false,
+        frontend_parser_profile: Some("SQLite"),
     },
 ];
 

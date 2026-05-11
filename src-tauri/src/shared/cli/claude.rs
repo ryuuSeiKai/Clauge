@@ -42,31 +42,9 @@ impl CliRunner for ClaudeRunner {
     }
 
     fn resolve_binary_path(&self) -> String {
-        // On Unix: spawn the user's shell with `-l -i -c "which claude"` so PATH
-        // adjustments from rc files (nvm, fnm, asdf) are visible.
-        // On Windows: shell out directly to `where.exe claude` — no shell rc to
-        // worry about, and `which` does not exist there.
-        let (shell_path, shell_kind) = default_user_shell();
-        let (binary, args) = if cfg!(target_os = "windows") {
-            ("where.exe".to_string(), vec![BINARY.to_string()])
-        } else {
-            (
-                shell_path.clone(),
-                shell_kind.exec_command_argv(&format!("which {}", BINARY)),
-            )
-        };
-
-        if let Ok(output) = std::process::Command::new(&binary).args(&args).output() {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                // `where.exe` may print multiple matches (one per line). Take the first.
-                let path = stdout.lines().next().unwrap_or("").trim().to_string();
-                if !path.is_empty() {
-                    return path;
-                }
-            }
-        }
-        BINARY.to_string()
+        crate::shared::platform::path::find_binary(BINARY)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| BINARY.to_string())
     }
 
     fn build_spawn_command(&self, opts: &SpawnOpts) -> String {

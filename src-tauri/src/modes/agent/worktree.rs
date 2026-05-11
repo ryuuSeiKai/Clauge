@@ -44,7 +44,63 @@ pub fn agent_create_worktree(project_path: String, branch_name: String) -> Resul
 
 #[tauri::command]
 pub fn agent_remove_worktree(project_path: String, worktree_path: String) -> Result<(), String> {
-    let _ = std::process::Command::new("git").args(["-C", &project_path, "worktree", "remove", "--force", &worktree_path]).output();
-    let _ = std::process::Command::new("git").args(["-C", &project_path, "worktree", "prune"]).output();
+    use crate::shared::platform::path::{apply_user_path, find_binary};
+    let git_bin = find_binary("git").ok_or_else(|| "git is not installed or not on PATH".to_string())?;
+
+    let mut remove = std::process::Command::new(&git_bin);
+    apply_user_path(&mut remove);
+    let out = remove
+        .args(["-C", &project_path, "worktree", "remove", "--force", &worktree_path])
+        .output()
+        .map_err(|e| format!("git worktree remove failed to spawn: {e}"))?;
+
+    let mut prune = std::process::Command::new(&git_bin);
+    apply_user_path(&mut prune);
+    let _ = prune
+        .args(["-C", &project_path, "worktree", "prune"])
+        .output();
+
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        // Treat "not a working tree" / "no such directory" as success — the
+        // worktree is already gone (deleted outside Clauge); prune above
+        // cleared the stale git metadata. Caller's intent is satisfied.
+        let lower = stderr.to_lowercase();
+        if lower.contains("is not a working tree")
+            || lower.contains("no such file or directory")
+            || lower.contains("not a valid working tree")
+        {
+            return Ok(());
+        }
+        return Err(if stderr.is_empty() {
+            "git worktree remove failed with no output".to_string()
+        } else {
+            stderr
+        });
+    }
     Ok(())
+}
+
+/// True when the worktree at `worktree_path` has uncommitted changes
+/// (modified, staged, or untracked). Used as a preflight before the
+/// destructive `git worktree remove --force` in session-delete so we
+/// can warn the user that committing-or-stashing now would save work
+/// that's about to be discarded.
+#[tauri::command]
+pub fn agent_worktree_is_dirty(worktree_path: String) -> Result<bool, String> {
+    use crate::shared::platform::path::{apply_user_path, find_binary};
+    let git_bin = find_binary("git").ok_or_else(|| "git is not installed or not on PATH".to_string())?;
+    let mut cmd = std::process::Command::new(&git_bin);
+    apply_user_path(&mut cmd);
+    let out = cmd
+        .args(["-C", &worktree_path, "status", "--porcelain"])
+        .output()
+        .map_err(|e| format!("git status failed to spawn: {e}"))?;
+    if !out.status.success() {
+        // Worktree path doesn't exist / isn't a git checkout. Treat as
+        // "not dirty" so the delete flow doesn't block on a missing
+        // worktree — the user wants it gone either way.
+        return Ok(false);
+    }
+    Ok(!String::from_utf8_lossy(&out.stdout).trim().is_empty())
 }

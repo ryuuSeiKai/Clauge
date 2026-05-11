@@ -14,3 +14,4 @@ pub mod client;
 pub mod ai_tools;
 pub mod dialects;
 pub mod clickhouse_client;
+pub mod d1_client;

@@ -122,7 +122,14 @@ async fn resolve_card_ctx(pool: &SqlitePool, card_id: &str) -> Result<CardCtx, C
 /// Run a git subcommand inside the card's worktree. Returns CliError
 /// on non-zero exit, classified via the shared helper.
 fn run_git(worktree: &str, args: &[&str]) -> Result<std::process::Output, CliError> {
-    let mut cmd = Command::new("git");
+    let git_bin = crate::shared::platform::path::find_binary("git").ok_or_else(|| {
+        CliError::NotInstalled {
+            tool: "git".into(),
+            install_url: install_url_for("git").into(),
+        }
+    })?;
+    let mut cmd = Command::new(&git_bin);
+    crate::shared::platform::path::apply_user_path(&mut cmd);
     cmd.arg("-C").arg(worktree);
     for a in args {
         cmd.arg(a);
@@ -272,7 +279,14 @@ pub async fn raise_or_update_pr(
         .unwrap_or_else(|| format!("Card branch `{}` — see card thread for context.", ctx.branch));
 
     // gh and glab share the create flow but differ on flag names.
-    let mut cmd = Command::new(tool);
+    let tool_bin = crate::shared::platform::path::find_binary(tool).ok_or_else(|| {
+        CliError::NotInstalled {
+            tool: tool.into(),
+            install_url: install_url_for(tool).into(),
+        }
+    })?;
+    let mut cmd = Command::new(&tool_bin);
+    crate::shared::platform::path::apply_user_path(&mut cmd);
     cmd.current_dir(&ctx.worktree);
     if tool == "gh" {
         cmd.args([

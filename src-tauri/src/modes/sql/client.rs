@@ -9,6 +9,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::clickhouse_client::ClickhouseClient;
+use super::d1_client::D1Client;
 use super::dialects::{descriptor_for_key, SqlDialect};
 
 // --- Types ---
@@ -102,6 +103,9 @@ pub enum DatabasePool {
     /// a stateless `ClickhouseClient` that issues `FORMAT JSON` requests
     /// per query. There is no pool to close — `close()` is a no-op.
     Clickhouse(ClickhouseClient),
+    /// Cloudflare D1 — HTTPS-only, SQLite-flavoured. Stateless reqwest
+    /// wrapper; `close()` is a no-op.
+    D1(D1Client),
 }
 
 impl Clone for DatabasePool {
@@ -111,6 +115,7 @@ impl Clone for DatabasePool {
             Self::MySql(p) => Self::MySql(p.clone()),
             Self::Sqlite(p) => Self::Sqlite(p.clone()),
             Self::Clickhouse(c) => Self::Clickhouse(c.clone()),
+            Self::D1(c) => Self::D1(c.clone()),
         }
     }
 }
@@ -168,6 +173,16 @@ fn build_clickhouse_url(config: &SqlConnectionConfig) -> String {
     format!("{}://{}:{}/?database={}", scheme, host, port, config.database)
 }
 
+fn build_d1_url(config: &SqlConnectionConfig) -> String {
+    // D1 reuses `host` as account_id and `database` as database_id (see
+    // d1_client.rs). The URL is surfaced for diagnostics / logging only;
+    // `create_pool` constructs `D1Client` directly from the config.
+    format!(
+        "https://api.cloudflare.com/client/v4/accounts/{}/d1/database/{}/query",
+        config.host, config.database
+    )
+}
+
 fn build_connection_url(config: &SqlConnectionConfig) -> Result<String, String> {
     let descriptor = descriptor_for_key(&config.driver)
         .ok_or_else(|| format!("Unsupported driver: {}", config.driver))?;
@@ -176,6 +191,7 @@ fn build_connection_url(config: &SqlConnectionConfig) -> Result<String, String> 
         SqlDialect::MySql => build_mysql_url(config),
         SqlDialect::Sqlite => build_sqlite_url(config),
         SqlDialect::Clickhouse => build_clickhouse_url(config),
+        SqlDialect::D1 => build_d1_url(config),
     })
 }
 
@@ -287,6 +303,18 @@ async fn build_pool_inner(
                 .map_err(|e| format!("ClickHouse connection failed: {}", e))?;
             log::info!("[Clauge SQL] ClickHouse connected OK");
             Ok(DatabasePool::Clickhouse(client))
+        }
+        SqlDialect::D1 => {
+            // D1 is always HTTPS to api.cloudflare.com — SSH tunneling
+            // would not help and isn't surfaced in the dialog. We ignore
+            // any `ssh_profile_id` here.
+            let client = D1Client::new(config, app_pool).await?;
+            client
+                .ping()
+                .await
+                .map_err(|e| format!("D1 connection failed: {}", e))?;
+            log::info!("[Clauge SQL] D1 connected OK");
+            Ok(DatabasePool::D1(client))
         }
     }
 }
@@ -533,8 +561,9 @@ pub async fn sql_connect_database(
             DatabasePool::Postgres(p) => p.close().await,
             DatabasePool::MySql(p) => p.close().await,
             DatabasePool::Sqlite(p) => p.close().await,
-            // ClickHouse client is stateless HTTP — nothing to close.
+            // ClickHouse + D1 clients are stateless HTTP — nothing to close.
             DatabasePool::Clickhouse(_) => {}
+            DatabasePool::D1(_) => {}
         }
     }
     // Drop any prior tunnel under this key so the old SSH session closes
@@ -559,6 +588,7 @@ pub async fn sql_disconnect(
             DatabasePool::MySql(p) => p.close().await,
             DatabasePool::Sqlite(p) => p.close().await,
             DatabasePool::Clickhouse(_) => {}
+            DatabasePool::D1(_) => {}
         }
         // Drop any associated tunnel — its Drop closes the SSH session.
         let _ = manager.tunnels.lock().await.remove(&connection_id);
@@ -581,6 +611,7 @@ pub async fn sql_test_connection(
         DatabasePool::MySql(p) => p.close().await,
         DatabasePool::Sqlite(p) => p.close().await,
         DatabasePool::Clickhouse(_) => {}
+        DatabasePool::D1(_) => {}
     }
     drop(tunnel);
     Ok(())
@@ -698,6 +729,23 @@ pub async fn sql_execute_query(
                 duration_ms,
             })
         }
+        DatabasePool::D1(c) => {
+            // D1 returns its own per-statement `meta.duration` (seconds);
+            // use that when present so the UI reflects server-side time
+            // rather than including round-trip latency.
+            let result = c.query(&query).await?;
+            let duration_ms = if result.duration_ms > 0 {
+                result.duration_ms
+            } else {
+                start.elapsed().as_millis() as u64
+            };
+            Ok(SqlQueryResult {
+                columns: result.columns,
+                rows: result.rows,
+                affected_rows: result.affected,
+                duration_ms,
+            })
+        }
     }
 }
 
@@ -743,6 +791,13 @@ pub async fn sql_list_databases(
                 .filter_map(|v| v.as_str().map(|s| s.to_string()))
                 .collect())
         }
+        DatabasePool::D1(c) => {
+            // A D1 connection IS a single database — listing all databases
+            // in the Cloudflare account would require a separate /accounts/
+            // /d1/database endpoint and an additional permission scope.
+            // Surface just the connected database id, matching SQLite.
+            Ok(vec![c.database.clone()])
+        }
     }
 }
 
@@ -786,6 +841,12 @@ pub async fn sql_create_database(
             let stmt = format!("CREATE DATABASE `{}`", name.replace('`', "``"));
             c.query(&stmt).await?;
         }
+        DatabasePool::D1(_) => {
+            // D1 databases are provisioned via the Cloudflare dashboard or
+            // the /accounts/{}/d1/database POST endpoint — not from inside
+            // a query. Refuse here rather than fake success.
+            return Err("D1 databases must be created from the Cloudflare dashboard or wrangler CLI.".to_string());
+        }
     }
 
     Ok(())
@@ -821,6 +882,10 @@ pub async fn sql_list_schemas(
             // ClickHouse has no separate "schema" concept — surface the
             // active database name as the only schema, mirroring SQLite.
             Ok(vec![c.database.clone()])
+        }
+        DatabasePool::D1(_) => {
+            // D1 is SQLite under the hood; one schema, named "main".
+            Ok(vec!["main".to_string()])
         }
     }
 }
@@ -941,6 +1006,34 @@ pub async fn sql_list_tables(
                 })
                 .collect())
         }
+        DatabasePool::D1(c) => {
+            // D1 is SQLite — use sqlite_master, same query as the local
+            // SQLite branch above. Filter out internal `sqlite_*` / `_cf_*`
+            // (Cloudflare-internal D1 bookkeeping tables) so they don't
+            // clutter the sidebar.
+            let result = c
+                .query(
+                    "SELECT name, type FROM sqlite_master \
+                     WHERE type IN ('table', 'view') \
+                       AND name NOT LIKE 'sqlite_%' \
+                       AND name NOT LIKE '_cf_%' \
+                     ORDER BY name",
+                )
+                .await?;
+            Ok(result
+                .rows
+                .into_iter()
+                .filter_map(|row| {
+                    let mut it = row.into_iter();
+                    let name = it.next()?.as_str().map(|s| s.to_string())?;
+                    let table_type = it
+                        .next()
+                        .and_then(|v| v.as_str().map(|s| s.to_uppercase()))
+                        .unwrap_or_else(|| "TABLE".to_string());
+                    Some(TableInfo { name, table_type, row_count: None })
+                })
+                .collect())
+        }
     }
 }
 
@@ -1057,6 +1150,64 @@ pub async fn sql_describe_table(
                     is_nullable: r.notnull == 0,
                     is_primary_key: r.pk > 0,
                     default_value: r.dflt_value,
+                })
+                .collect())
+        }
+        DatabasePool::D1(c) => {
+            // D1 is SQLite — use PRAGMA table_info, same shape as the
+            // sqlx-sqlite branch above. D1 returns JSON column values as
+            // typed primitives, so the int/string discriminators below
+            // need to handle both shapes (some clients stringify ints).
+            let stmt = format!(
+                "PRAGMA table_info(\"{}\")",
+                table.replace('"', "\"\"")
+            );
+            let result = c.query(&stmt).await?;
+            Ok(result
+                .rows
+                .into_iter()
+                .filter_map(|row| {
+                    // Columns from PRAGMA table_info:
+                    //   0:cid 1:name 2:type 3:notnull 4:dflt_value 5:pk
+                    let mut it = row.into_iter();
+                    let _cid = it.next();
+                    let name = it.next()?.as_str().map(|s| s.to_string())?;
+                    let data_type = it
+                        .next()
+                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                        .unwrap_or_default();
+                    let notnull = it
+                        .next()
+                        .map(|v| match v {
+                            serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) > 0,
+                            serde_json::Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                            serde_json::Value::Bool(b) => b,
+                            _ => false,
+                        })
+                        .unwrap_or(false);
+                    let default_value = it
+                        .next()
+                        .and_then(|v| match v {
+                            serde_json::Value::Null => None,
+                            serde_json::Value::String(s) => Some(s),
+                            other => Some(other.to_string()),
+                        });
+                    let is_pk = it
+                        .next()
+                        .map(|v| match v {
+                            serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) > 0,
+                            serde_json::Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                            serde_json::Value::Bool(b) => b,
+                            _ => false,
+                        })
+                        .unwrap_or(false);
+                    Some(ColumnInfo {
+                        name,
+                        data_type,
+                        is_nullable: !notnull,
+                        is_primary_key: is_pk,
+                        default_value,
+                    })
                 })
                 .collect())
         }

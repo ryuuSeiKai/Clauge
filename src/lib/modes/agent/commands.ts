@@ -64,6 +64,7 @@ export const agentKillTerminal = (terminalId: string) => invoke<void>('agent_kil
 export const agentIsGitRepo = (path: string) => invoke<boolean>('agent_is_git_repo', { path });
 export const agentCreateWorktree = (projectPath: string, branchName: string) => invoke<string>('agent_create_worktree', { projectPath, branchName });
 export const agentRemoveWorktree = (projectPath: string, worktreePath: string) => invoke<void>('agent_remove_worktree', { projectPath, worktreePath });
+export const agentWorktreeIsDirty = (worktreePath: string) => invoke<boolean>('agent_worktree_is_dirty', { worktreePath });
 
 // Git — all use projectPath (camelCase for Tauri v2 auto-conversion to project_path)
 export const agentGitStatus = (projectPath: string) => invoke<GitFileChange[]>('agent_git_status', { projectPath });

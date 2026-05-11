@@ -68,8 +68,16 @@
 
   // Load SSH profiles on dialog open if the store is empty — keeps the
   // picker populated without forcing the user to visit SSH mode first.
+  // Guard with a one-shot flag: `loadSshProfiles` writes to the
+  // `sshProfiles` store unconditionally (even with an empty list), and
+  // this effect depends on that store, so without the guard the empty
+  // result re-triggers the effect → reload → empty result → reload …
+  // until the process is killed. The flag fires the load at most once
+  // per dialog instance; subsequent opens reuse whatever's cached.
+  let sshLoadAttempted = $state(false);
   $effect(() => {
-    if (show && $sshProfiles.length === 0) {
+    if (show && !sshLoadAttempted) {
+      sshLoadAttempted = true;
       loadSshProfiles();
     }
   });
@@ -89,6 +97,11 @@
   }
 
   const usesHostPort = $derived(descriptorFor(driver)?.usesHostPort ?? false);
+  // D1 is special: HTTPS-only to api.cloudflare.com, identified by an
+  // account id + database id + API token (not host/port/user/pass). We
+  // store account_id in `host`, database_id in `database`, api_token in
+  // `password` — matches the Rust client's field-reuse convention.
+  const isD1 = $derived(driver === 'd1');
   const selectedProfile = $derived(
     selectedSshProfileId ? $sshProfiles.find((p) => p.id === selectedSshProfileId) ?? null : null
   );
@@ -193,10 +206,28 @@
       </div>
     {/if}
 
-    <label class="conn-field">
-      <span class="conn-label">{usesHostPort ? 'Database' : 'File Path'}</span>
-      <input class="conn-input" type="text" bind:value={database} placeholder={usesHostPort ? 'mydb' : '/path/to/db.sqlite'} />
-    </label>
+    {#if isD1}
+      <label class="conn-field">
+        <span class="conn-label">Account ID</span>
+        <input class="conn-input" type="text" bind:value={host} placeholder="33-char Cloudflare account ID" />
+      </label>
+      <label class="conn-field">
+        <span class="conn-label">Database ID</span>
+        <input class="conn-input" type="text" bind:value={database} placeholder="UUID from your D1 dashboard" />
+      </label>
+      <label class="conn-field">
+        <span class="conn-label">API Token</span>
+        <input class="conn-input" type="password" bind:value={password} placeholder="Token with D1:Edit permission" />
+        <span class="ssh-caption">
+          Create one at dash.cloudflare.com/profile/api-tokens — needs the <code>D1:Edit</code> permission scoped to your account.
+        </span>
+      </label>
+    {:else}
+      <label class="conn-field">
+        <span class="conn-label">{usesHostPort ? 'Database' : 'File Path'}</span>
+        <input class="conn-input" type="text" bind:value={database} placeholder={usesHostPort ? 'mydb' : '/path/to/db.sqlite'} />
+      </label>
+    {/if}
 
     {#if usesHostPort}
       <div class="conn-row">

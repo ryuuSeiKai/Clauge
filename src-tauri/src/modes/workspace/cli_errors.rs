@@ -80,16 +80,11 @@ impl CliError {
     }
 }
 
-/// Cross-platform PATH check. Returns true when `bin` resolves on
-/// PATH. Uses `where` on Windows, `which` everywhere else — both
-/// exit non-zero when the binary is missing.
+/// Cross-platform PATH check. Delegates to the shared resolver so
+/// bundled GUI builds see the same PATH a real terminal would —
+/// launchd / desktop launchers strip brew/nvm/asdf entries otherwise.
 pub fn is_on_path(bin: &str) -> bool {
-    let which = if cfg!(target_os = "windows") { "where" } else { "which" };
-    std::process::Command::new(which)
-        .arg(bin)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    crate::shared::platform::path::is_on_path(bin)
 }
 
 /// Canonical install URL for a known CLI. Empty string for unknown

@@ -42,6 +42,7 @@
     agentCheckClaudeInstalled,
   } from '../commands';
   import ClaudeNotInstalledModal from './ClaudeNotInstalledModal.svelte';
+  import { showToast } from '$lib/shared/primitives/toast';
   import { refreshAgentGitStatus, refreshAgentContextUsage, loadAgentSessions, agentGitBranchName, agentGitFiles, agentGitAhead, agentGitBehind } from '../stores';
   import { getTerminalTheme } from '$lib/utils/theme';
   import { appearance } from '$lib/stores/settings';
@@ -1384,13 +1385,25 @@
     agentShellIds.update(m => { m.delete(session.id); return new Map(m); });
     agentSessionExited.update(m => { m.delete(session.id); return new Map(m); });
 
-    // Remove worktree if exists
+    // Remove worktree if exists. Surface failures via toast — silently
+    // swallowing leaves an orphan directory on disk after the DB row is
+    // gone, with no signal to the user.
     if (session.worktreePath) {
-      await agentRemoveWorktree(session.projectPath, session.worktreePath).catch(() => {});
+      try {
+        await agentRemoveWorktree(session.projectPath, session.worktreePath);
+      } catch (e) {
+        showToast(`Worktree cleanup failed: ${e}. The directory may remain at ${session.worktreePath}.`, 'error');
+      }
     }
 
-    // Delete from DB
-    await agentDeleteSession(session.id).catch(() => {});
+    // Delete from DB. If this fails the session ghost stays in the list
+    // — better to know than to silently re-appear on next load.
+    try {
+      await agentDeleteSession(session.id);
+    } catch (e) {
+      showToast(`Failed to delete session: ${e}`, 'error');
+      return;
+    }
 
     // If this was the active session, clear it
     const currentActive = get(activeAgentSession);

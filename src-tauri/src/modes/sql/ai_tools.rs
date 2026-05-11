@@ -170,6 +170,7 @@ pub async fn execute_sql_tool(
                         Err(e) => Err(sqlx::Error::Protocol(e)),
                     }
                 }
+                DatabasePool::D1(c) => Ok(vec![(c.database.clone(),)]),
             };
 
             match result {
@@ -210,6 +211,8 @@ pub async fn execute_sql_tool(
                 // ClickHouse has no separate schema concept; surface the
                 // active database name as the only schema.
                 DatabasePool::Clickhouse(c) => Ok(vec![(c.database.clone(),)]),
+                // D1 is SQLite under the hood — single "main" schema.
+                DatabasePool::D1(_) => Ok(vec![("main".to_string(),)]),
             };
 
             match result {
@@ -296,6 +299,35 @@ pub async fn execute_sql_tool(
                                 } else {
                                     "TABLE".to_string()
                                 };
+                                Some((name, tt))
+                            })
+                            .collect()),
+                        Err(e) => Err(e),
+                    }
+                }
+                DatabasePool::D1(c) => {
+                    // Same sqlite_master query the SQLite branch above
+                    // would use; D1 hides its own bookkeeping in `_cf_*`.
+                    match c
+                        .query(
+                            "SELECT name, type FROM sqlite_master \
+                             WHERE type IN ('table', 'view') \
+                               AND name NOT LIKE 'sqlite_%' \
+                               AND name NOT LIKE '_cf_%' \
+                             ORDER BY name",
+                        )
+                        .await
+                    {
+                        Ok(r) => Ok(r
+                            .rows
+                            .into_iter()
+                            .filter_map(|row| {
+                                let mut it = row.into_iter();
+                                let name = it.next()?.as_str().map(|s| s.to_string())?;
+                                let tt = it
+                                    .next()
+                                    .and_then(|v| v.as_str().map(|s| s.to_uppercase()))
+                                    .unwrap_or_else(|| "TABLE".to_string());
                                 Some((name, tt))
                             })
                             .collect()),
@@ -455,6 +487,67 @@ pub async fn execute_sql_tool(
                                         "nullable": nullable,
                                         "primaryKey": is_pk,
                                         "default": default,
+                                    }))
+                                })
+                                .collect();
+                            Ok(cols)
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                DatabasePool::D1(c) => {
+                    // D1 supports PRAGMA. Mirror the SQLite shape via raw
+                    // JSON values since D1Client doesn't dispatch through
+                    // sqlx's typed row parser.
+                    let stmt = format!(
+                        "PRAGMA table_info(\"{}\")",
+                        table.replace('"', "\"\"")
+                    );
+                    match c.query(&stmt).await {
+                        Ok(r) => {
+                            let cols: Vec<serde_json::Value> = r
+                                .rows
+                                .into_iter()
+                                .filter_map(|row| {
+                                    // cid, name, type, notnull, dflt_value, pk
+                                    let mut it = row.into_iter();
+                                    let _cid = it.next();
+                                    let name = it.next()?.as_str().map(|s| s.to_string())?;
+                                    let dtype = it
+                                        .next()
+                                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                                        .unwrap_or_default();
+                                    let notnull = it
+                                        .next()
+                                        .map(|v| match v {
+                                            serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) > 0,
+                                            serde_json::Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                                            serde_json::Value::Bool(b) => b,
+                                            _ => false,
+                                        })
+                                        .unwrap_or(false);
+                                    let dflt = it
+                                        .next()
+                                        .and_then(|v| match v {
+                                            serde_json::Value::Null => None,
+                                            serde_json::Value::String(s) => Some(s),
+                                            other => Some(other.to_string()),
+                                        });
+                                    let is_pk = it
+                                        .next()
+                                        .map(|v| match v {
+                                            serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) > 0,
+                                            serde_json::Value::String(s) => s == "1" || s.eq_ignore_ascii_case("true"),
+                                            serde_json::Value::Bool(b) => b,
+                                            _ => false,
+                                        })
+                                        .unwrap_or(false);
+                                    Some(serde_json::json!({
+                                        "name": name,
+                                        "type": dtype,
+                                        "nullable": !notnull,
+                                        "primaryKey": is_pk,
+                                        "default": dflt,
                                     }))
                                 })
                                 .collect();
@@ -652,6 +745,9 @@ pub async fn execute_sql_tool(
                 DatabasePool::Clickhouse(c) => {
                     c.query(query).await.map(|r| (r.columns, r.rows))
                 }
+                DatabasePool::D1(c) => {
+                    c.query(query).await.map(|r| (r.columns, r.rows))
+                }
             };
             let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -783,6 +879,33 @@ pub async fn execute_sql_tool(
                         Err(e) => Err(sqlx::Error::Protocol(e)),
                     }
                 }
+                crate::modes::sql::client::DatabasePool::D1(c) => {
+                    match c
+                        .query(
+                            "SELECT name, type FROM sqlite_master \
+                             WHERE type IN ('table', 'view') \
+                               AND name NOT LIKE 'sqlite_%' \
+                               AND name NOT LIKE '_cf_%' \
+                             ORDER BY name",
+                        )
+                        .await
+                    {
+                        Ok(r) => Ok(r
+                            .rows
+                            .into_iter()
+                            .filter_map(|row| {
+                                let mut it = row.into_iter();
+                                let name = it.next()?.as_str().map(|s| s.to_string())?;
+                                let tt = it
+                                    .next()
+                                    .and_then(|v| v.as_str().map(|s| s.to_uppercase()))
+                                    .unwrap_or_else(|| "TABLE".to_string());
+                                Some((name, tt))
+                            })
+                            .collect()),
+                        Err(e) => Err(sqlx::Error::Protocol(e)),
+                    }
+                }
             };
 
             match tables_result {
@@ -866,6 +989,39 @@ pub async fn execute_sql_tool(
                                     Err(e) => Err(sqlx::Error::Protocol(e)),
                                 }
                             }
+                            crate::modes::sql::client::DatabasePool::D1(c) => {
+                                let stmt = format!(
+                                    "PRAGMA table_info(\"{}\")",
+                                    table_name.replace('"', "\"\"")
+                                );
+                                match c.query(&stmt).await {
+                                    Ok(r) => {
+                                        let cols: Vec<(String, String, String)> = r
+                                            .rows
+                                            .into_iter()
+                                            .filter_map(|row| {
+                                                let mut it = row.into_iter();
+                                                let _cid = it.next();
+                                                let name = it.next()?.as_str().map(|s| s.to_string())?;
+                                                let dtype = it
+                                                    .next()
+                                                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                                                    .unwrap_or_default();
+                                                let notnull = it
+                                                    .next()
+                                                    .map(|v| matches!(v,
+                                                        serde_json::Value::Number(n) if n.as_u64().unwrap_or(0) > 0
+                                                    ))
+                                                    .unwrap_or(false);
+                                                let nullable = if notnull { "NO".to_string() } else { "YES".to_string() };
+                                                Some((name, dtype, nullable))
+                                            })
+                                            .collect();
+                                        Ok(cols)
+                                    }
+                                    Err(e) => Err(sqlx::Error::Protocol(e)),
+                                }
+                            }
                         };
                         let cols_str = match cols {
                             Ok(c) => c.iter().map(|(name, dtype, nullable)| {
@@ -906,6 +1062,8 @@ pub async fn execute_sql_tool(
                 // ClickHouse uses plain `EXPLAIN <query>` (defaults to
                 // EXPLAIN PLAN). Older versions accept the same syntax.
                 crate::modes::sql::client::DatabasePool::Clickhouse(_) => format!("EXPLAIN {}", query),
+                // D1 is SQLite — same EXPLAIN QUERY PLAN syntax.
+                crate::modes::sql::client::DatabasePool::D1(_) => format!("EXPLAIN QUERY PLAN {}", query),
             };
 
             let result = match pool_entry {
@@ -940,6 +1098,26 @@ pub async fn execute_sql_tool(
                         })
                 }
                 crate::modes::sql::client::DatabasePool::Clickhouse(c) => {
+                    match c.query(&explain_sql).await {
+                        Ok(r) => Ok(r
+                            .rows
+                            .iter()
+                            .map(|row| {
+                                row.iter()
+                                    .map(|v| match v {
+                                        serde_json::Value::String(s) => s.clone(),
+                                        serde_json::Value::Null => String::new(),
+                                        other => other.to_string(),
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join(" | ")
+                            })
+                            .collect::<Vec<_>>()
+                            .join("\n")),
+                        Err(e) => Err(sqlx::Error::Protocol(e)),
+                    }
+                }
+                crate::modes::sql::client::DatabasePool::D1(c) => {
                     match c.query(&explain_sql).await {
                         Ok(r) => Ok(r
                             .rows

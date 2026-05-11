@@ -4,7 +4,7 @@
 // ports, abbreviations, parser profiles, capability flags) consumed by the
 // SQL UI. Keep the entries here in lockstep with the Rust descriptor list.
 
-export type SqlDialectKey = 'postgresql' | 'mysql' | 'sqlite' | 'clickhouse';
+export type SqlDialectKey = 'postgresql' | 'mysql' | 'sqlite' | 'clickhouse' | 'd1';
 
 export interface SqlDialectDescriptor {
   key: SqlDialectKey;
@@ -29,6 +29,11 @@ export const SQL_DIALECTS: readonly SqlDialectDescriptor[] = [
   // dedicated profile, so we pin PostgreSQL as the closest fallback;
   // ClickHouse uses backticks for identifier quoting in DDL.
   { key: 'clickhouse', displayName: 'ClickHouse', abbreviation: 'CH', defaultPort: 8123, usesHostPort: true,  usesCredentials: true,  parserProfile: 'PostgreSQL', identifierQuote: '`' },
+  // Cloudflare D1 — HTTPS-only, SQLite-flavoured. usesHostPort + usesCredentials
+  // are false so the generic host/port/user/pass form is hidden; the
+  // ConnectionDialog renders D1-specific fields (Account ID / Database ID /
+  // API Token) when driver === 'd1'.
+  { key: 'd1',         displayName: 'Cloudflare D1', abbreviation: 'D1', defaultPort: 0, usesHostPort: false, usesCredentials: false, parserProfile: 'SQLite',     identifierQuote: '"' },
 ] as const;
 
 export function descriptorFor(key: string): SqlDialectDescriptor | undefined {

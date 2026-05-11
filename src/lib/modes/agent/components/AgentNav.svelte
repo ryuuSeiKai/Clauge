@@ -8,6 +8,7 @@
   import { get } from 'svelte/store';
   import { AGENT_EVENT } from '$lib/shared/constants/events';
   import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
+  import { agentWorktreeIsDirty } from '../commands';
 
   interface Props {
     searchQuery?: string;
@@ -172,15 +173,32 @@
         label: 'Delete',
         icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>',
         danger: true,
-        action: () => showConfirm({
-          title: 'Delete Session',
-          message: `Delete "${session.title}"? This cannot be undone.`,
-          danger: true,
-          confirmText: 'Delete',
-          action: async () => {
-            window.dispatchEvent(new CustomEvent(AGENT_EVENT.DELETE_SESSION, { detail: { session } }));
-          },
-        }),
+        action: async () => {
+          // Preflight: a dirty worktree means the upcoming
+          // `git worktree remove --force` would discard the user's
+          // uncommitted code (modified, staged, AND untracked files).
+          // We refuse here and ask the user to clean up first rather
+          // than offering a "discard anyway" escape hatch — accidental
+          // data loss has no good recovery path, but committing or
+          // stashing takes seconds.
+          let dirty = false;
+          if (session.worktreePath) {
+            try { dirty = await agentWorktreeIsDirty(session.worktreePath); } catch { /* probe error → treat as clean and let the normal flow run */ }
+          }
+          if (dirty) {
+            showToast(`"${session.title}" has uncommitted changes in ${session.worktreePath}. Commit or stash them, then try again.`, 'info');
+            return;
+          }
+          showConfirm({
+            title: 'Delete Session',
+            message: `Delete "${session.title}"? This cannot be undone.`,
+            danger: true,
+            confirmText: 'Delete',
+            action: async () => {
+              window.dispatchEvent(new CustomEvent(AGENT_EVENT.DELETE_SESSION, { detail: { session } }));
+            },
+          });
+        },
       },
     ]);
   }

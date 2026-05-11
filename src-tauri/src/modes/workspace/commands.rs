@@ -1331,10 +1331,14 @@ pub async fn workspace_scan_project_issues(
 }
 
 fn scan_project_issues_sync(project_path: &str) -> Result<ProjectScanResult, String> {
+    use crate::shared::platform::path::{apply_user_path, find_binary};
     use std::process::Command;
 
     // 1. Is it a git repo at all?
-    let inside = Command::new("git")
+    let git_bin = find_binary("git").unwrap_or_else(|| "git".into());
+    let mut git = Command::new(&git_bin);
+    apply_user_path(&mut git);
+    let inside = git
         .args(["-C", project_path, "rev-parse", "--is-inside-work-tree"])
         .output();
     let inside_ok = matches!(&inside, Ok(o) if o.status.success());
@@ -1343,7 +1347,9 @@ fn scan_project_issues_sync(project_path: &str) -> Result<ProjectScanResult, Str
     }
 
     // 2. Read the origin remote URL.
-    let remote_out = Command::new("git")
+    let mut git = Command::new(&git_bin);
+    apply_user_path(&mut git);
+    let remote_out = git
         .args(["-C", project_path, "remote", "get-url", "origin"])
         .output()
         .map_err(|e| e.to_string())?;
@@ -1389,22 +1395,21 @@ fn scan_project_issues_sync(project_path: &str) -> Result<ProjectScanResult, Str
         };
 
     // 4. Is the CLI on PATH?
-    let which = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let which_ok = Command::new(which)
-        .arg(tool)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !which_ok {
-        return Ok(ProjectScanResult::ToolNotInstalled {
-            tool: tool.to_string(),
-            install_url: install_url.to_string(),
-        });
-    }
+    let tool_bin = match find_binary(tool) {
+        Some(p) => p,
+        None => {
+            return Ok(ProjectScanResult::ToolNotInstalled {
+                tool: tool.to_string(),
+                install_url: install_url.to_string(),
+            });
+        }
+    };
 
     // 5. Run the issue list. cwd matters — both CLIs read repo context
     //    from the working directory.
-    let out = Command::new(tool)
+    let mut cmd = Command::new(&tool_bin);
+    apply_user_path(&mut cmd);
+    let out = cmd
         .current_dir(project_path)
         .args(&args)
         .output()
@@ -1488,6 +1493,7 @@ pub async fn workspace_scan_project_issues_by_url(
 }
 
 fn scan_project_url_sync(url: &str) -> Result<ProjectScanResult, String> {
+    use crate::shared::platform::path::{apply_user_path, find_binary};
     use std::process::Command;
 
     // 1. Pick CLI + parse owner/repo from the URL.
@@ -1530,21 +1536,19 @@ fn scan_project_url_sync(url: &str) -> Result<ProjectScanResult, String> {
     };
 
     // 2. CLI on PATH?
-    let which = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let which_ok = Command::new(which)
-        .arg(tool)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !which_ok {
-        return Ok(ProjectScanResult::ToolNotInstalled {
-            tool: tool.to_string(),
-            install_url: install_url.to_string(),
-        });
-    }
+    let tool_bin = match find_binary(tool) {
+        Some(p) => p,
+        None => {
+            return Ok(ProjectScanResult::ToolNotInstalled {
+                tool: tool.to_string(),
+                install_url: install_url.to_string(),
+            });
+        }
+    };
 
     // 3. Run with --repo / -R prepended so cwd doesn't matter.
-    let mut cmd = Command::new(tool);
+    let mut cmd = Command::new(&tool_bin);
+    apply_user_path(&mut cmd);
     for a in &repo_arg { cmd.arg(a); }
     for a in &args { cmd.arg(a); }
     let out = cmd.output().map_err(|e| format!("{} failed to spawn: {}", tool, e))?;

@@ -611,6 +611,7 @@ ORDER BY ordinal_position;`);
       case 'mysql':      return '#00758F';
       case 'sqlite':     return '#909090';
       case 'clickhouse': return '#FFCC01';
+      case 'd1':         return '#F38020';
       default:           return 'var(--t3)';
     }
   }

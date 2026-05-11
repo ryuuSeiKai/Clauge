@@ -76,28 +76,21 @@ pub async fn push_card_to_repo(
         .ok_or_else(|| format!("Could not parse owner/repo from {repo_url}"))?;
 
     // ── 3. CLI on PATH? ────────────────────────────────────────────
-    let which_bin = if cfg!(target_os = "windows") { "where" } else { "which" };
-    let on_path = std::process::Command::new(which_bin)
-        .arg(tool)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !on_path {
-        return Err(format!(
-            "{tool} is not installed or not on PATH. Install it and retry."
-        ));
-    }
+    let tool_bin = crate::shared::platform::path::find_binary(tool).ok_or_else(|| {
+        format!("{tool} is not installed or not on PATH. Install it and retry.")
+    })?;
 
     // ── 4. Run the issue-create command. We capture stdout so we can
     //    parse the resulting issue URL — both CLIs print it on success.
     let title_owned = title.clone();
     let body_owned = description.clone();
     let owner_repo_owned = owner_repo.clone();
-    let tool_owned = tool.to_string();
     let source_owned = source.to_string();
+    let tool_bin_owned = tool_bin.clone();
 
     let output = tokio::task::spawn_blocking(move || {
-        let mut cmd = std::process::Command::new(&tool_owned);
+        let mut cmd = std::process::Command::new(&tool_bin_owned);
+        crate::shared::platform::path::apply_user_path(&mut cmd);
         if source_owned == "github" {
             cmd.args([
                 "issue",

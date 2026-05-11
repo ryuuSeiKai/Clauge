@@ -175,26 +175,30 @@ pub async fn drawer_chat_turn(
             )),
         });
     }
-    // Pre-flight: confirm the CLI binary is on PATH. Friendlier
-    // error than a cryptic spawn failure, and includes the install
-    // hint the user actually needs.
+    // Pre-flight: confirm the CLI binary resolves on the user's PATH
+    // (with rc-file additions sourced — see shared::platform::path).
+    // Bundled .app processes inherit a stripped launchd PATH, so a
+    // bare `Command::new("claude")` would fail NotFound even when the
+    // binary is reachable from a terminal.
     let bin = &argv[0];
-    let on_path = which_binary(bin);
-    if !on_path {
+    let resolved_bin = crate::shared::platform::path::find_binary(bin);
+    let Some(resolved_bin) = resolved_bin else {
         return Ok(soft_err(user_comment, &session.id, format!(
             "{bin} is not installed or not on PATH. Install it from \
              https://claude.com/claude-code and retry."
         )));
-    }
+    };
 
     let argv_owned = argv.clone();
+    let bin_path = resolved_bin.clone();
     let cwd_owned = cwd.clone();
     let provider_owned = coworker.provider.clone();
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(ONESHOT_TIMEOUT_SECS),
         tokio::task::spawn_blocking(move || {
-            let mut cmd = std::process::Command::new(&argv_owned[0]);
+            let mut cmd = std::process::Command::new(&bin_path);
             cmd.args(&argv_owned[1..]).current_dir(&cwd_owned);
+            crate::shared::platform::path::apply_user_path(&mut cmd);
             cmd.output()
         }),
     )
@@ -595,7 +599,18 @@ fn oneshot_argv(
     let persona = build_persona_prompt(coworker, card_id, worktree);
     match coworker.provider.as_str() {
         "claude" => {
-            let mut argv = vec!["claude".to_string(), "-p".to_string(), prompt.to_string()];
+            // `claude -p` runs without a TTY, so any permission prompt
+            // hangs the turn — the user never sees it and the agent
+            // never gets a response. Skip the gate; safety relies on
+            // the card-scoped worktree, the persona prompt's "NEVER
+            // commit/raise_pr/push on your own initiative" guardrails,
+            // and the Review-column safety gate on agent-initiated moves.
+            let mut argv = vec![
+                "claude".to_string(),
+                "-p".to_string(),
+                prompt.to_string(),
+                "--dangerously-skip-permissions".to_string(),
+            ];
             if !persona.is_empty() {
                 argv.push("--append-system-prompt".to_string());
                 argv.push(persona);
@@ -608,18 +623,6 @@ fn oneshot_argv(
         }
         _ => Vec::new(),
     }
-}
-
-/// Cross-platform `which`/`where` check — returns true when the
-/// binary is on PATH. Used as a preflight so we surface a clean
-/// "not installed" message instead of a cryptic spawn failure.
-fn which_binary(bin: &str) -> bool {
-    let which_cmd = if cfg!(target_os = "windows") { "where" } else { "which" };
-    std::process::Command::new(which_cmd)
-        .arg(bin)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
 }
 
 fn build_persona_prompt(
