@@ -3,7 +3,7 @@
   import { mode, navOpen, aiPanelOpen, activeModal } from '$lib/stores/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { isMac, isLinux } from '$lib/utils/platform';
-  import { cloudConnected, cloudUser, cloudDisplayHandle, syncing, setSyncing, setDisconnected, showSyncRestorePrompt, markSynced } from '$lib/stores/cloud';
+  import { cloudConnected, syncing, setSyncing, setDisconnected, showSyncRestorePrompt, markSynced } from '$lib/stores/cloud';
   import { cloudSyncPushNow, cloudSyncRestore, cloudLogout } from '$lib/commands/cloud';
   import { loadCollections } from '$lib/modes/rest/stores';
   import { loadEnvironments } from '$lib/modes/rest/stores';
@@ -296,9 +296,8 @@
               {$syncing ? 'Syncing...' : 'Sync Now'}
             </button>
             <button class="pm-item" onclick={() => handleProfileAction('sync')}>
-              <svg class="gh-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 7v10M7 12h10"/></svg>
-              <span class="pm-gh-user">{$cloudDisplayHandle?.handle ?? 'Signed in'}</span>
-              <svg class="pm-external" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+              <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 11-12 0 6 6 0 0112 0z"/><path d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2"/></svg>
+              Account
             </button>
           {:else}
             <button class="pm-item" onclick={() => handleProfileAction('sync')}>
@@ -604,7 +603,6 @@
   }
   .pm-sync-label { font-weight: 500; }
   .pm-sync-time { color: var(--t3); font-size: 10px; }
-  .pm-gh-user { }
   .pm-external {
     width: 10px !important; height: 10px !important;
     stroke: var(--t3) !important;

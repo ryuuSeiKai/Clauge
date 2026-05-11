@@ -159,6 +159,7 @@
         if (
             !show &&
             ($activeModal === "settings" ||
+                $activeModal === "settings:account" ||
                 $activeModal === "settings:ai" ||
                 $activeModal === "settings:agent" ||
                 $activeModal === "settings:agent:usage" ||
