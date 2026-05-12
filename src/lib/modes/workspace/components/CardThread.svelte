@@ -65,7 +65,10 @@
   const renderedBody = $derived(body ? renderBody(body) : '');
 
   function bubbleSide(actor: string): 'user' | 'agent' {
-    return describeActor(actor).kind === 'agent' ? 'agent' : 'user';
+    // Coworkers are personas backed by an agent CLI — their messages
+    // belong on the agent side of the thread, same as bare CLI actors.
+    const k = describeActor(actor).kind;
+    return k === 'agent' || k === 'coworker' ? 'agent' : 'user';
   }
 
   /** HH:MM extracted from createdAt, falling back to the raw string

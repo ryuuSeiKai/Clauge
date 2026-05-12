@@ -1,9 +1,20 @@
 <script lang="ts">
-  import { cloudConnected, cloudUser, cloudDisplayHandle } from '$lib/stores/cloud';
+  import { cloudConnected, cloudUser, cloudDisplayHandle, cloudConflicts } from '$lib/stores/cloud';
+
+  // The avatar tile itself indicates "signed in" (filled image / letters
+  // vs. the unconnected "CL" placeholder), so a green dot here would be
+  // redundant. We only show a dot when the user has something to *do* —
+  // currently: one or more kinds are conflict-locked and need their pick.
+  const needsAttention = $derived($cloudConnected && $cloudConflicts.length > 0);
 </script>
 
 <div class="avatar-connected">
-  <button class="avatar" title={$cloudConnected ? `${$cloudDisplayHandle?.handle ?? ''}` : 'Profile'}>
+  <button
+    class="avatar"
+    title={needsAttention
+      ? `Action required — ${$cloudConflicts.length} item${$cloudConflicts.length === 1 ? '' : 's'} to resolve`
+      : ($cloudConnected ? `${$cloudDisplayHandle?.handle ?? ''}` : 'Profile')}
+  >
     {#if $cloudConnected && $cloudUser?.avatarUrl}
       <img class="avatar-img" src={$cloudUser.avatarUrl} alt={$cloudDisplayHandle?.handle ?? ''} />
     {:else if $cloudConnected}
@@ -12,8 +23,8 @@
       <span class="avatar-letter">CL</span>
     {/if}
   </button>
-  {#if $cloudConnected}
-    <span class="avatar-dot"></span>
+  {#if needsAttention}
+    <span class="avatar-dot avatar-dot-action" aria-label="Action required"></span>
   {/if}
 </div>
 
@@ -61,7 +72,16 @@
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: var(--ok);
     border: 1.5px solid var(--s);
+  }
+  /* "Action required" — accent fill + soft pulse so the user notices
+     they have something to resolve even from across the screen. */
+  .avatar-dot-action {
+    background: var(--acc);
+    animation: avatarActionPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes avatarActionPulse {
+    0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acc) 50%, transparent); }
+    50%      { box-shadow: 0 0 0 4px color-mix(in srgb, var(--acc) 0%, transparent); }
   }
 </style>

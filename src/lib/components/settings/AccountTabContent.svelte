@@ -14,8 +14,12 @@
         setLastSyncedForKinds,
         markSynced,
         showSyncRestorePrompt,
+        cloudConflicts,
         type Provider,
     } from "$lib/stores/cloud";
+    import ConflictResolverModal from "$lib/components/cloud/ConflictResolverModal.svelte";
+
+    let conflictResolverOpen = $state(false);
     import {
         cloudGetStatus,
         cloudGithubLoginUrl,
@@ -235,9 +239,7 @@
             if (elapsed < 350)
                 await new Promise((r) => setTimeout(r, 350 - elapsed));
             showToast(
-                pushed.length
-                    ? `Synced ${pushed.join(", ")}`
-                    : "Already up to date",
+                pushed.length ? "Synced" : "Already up to date",
                 "success",
             );
         } catch (e) {
@@ -338,13 +340,8 @@
         }
     }
 
-    async function openUpgrade() {
-        try {
-            const { openUrl } = await import("@tauri-apps/plugin-opener");
-            await openUrl("https://clauge.in/pricing");
-        } catch {
-            window.open("https://clauge.in/pricing", "_blank");
-        }
+    function openUpgrade() {
+        showToast("Pro plan — coming soon", "info");
     }
 
     function openMenu(e: MouseEvent) {
@@ -501,39 +498,57 @@
                                 >{lastSyncOverall ?? "Never"}</span
                             >
                         </div>
-                        <button
-                            class="acc-sync-btn"
-                            onclick={syncNow}
-                            disabled={$syncing}
-                            title="Sync now"
-                        >
-                            {#if $syncing}
-                                <span
-                                    class="acc-spinner acc-spinner-light acc-spinner-tiny"
-                                ></span>
-                            {:else}
-                                <svg
-                                    viewBox="0 0 24 24"
-                                    width="13"
-                                    height="13"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                >
-                                    <path d="M23 4v6h-6" />
-                                    <path d="M1 20v-6h6" />
-                                    <path
-                                        d="M3.51 9a9 9 0 0114.85-3.36L23 10"
-                                    />
-                                    <path
-                                        d="M1 14l4.64 4.36A9 9 0 0020.49 15"
-                                    />
+                        {#if $cloudConflicts.length > 0}
+                            <!-- Conflict-mode replacement for the Sync
+                                 button — same slot, accent-tinted, opens
+                                 the resolver instead of pushing. -->
+                            <button
+                                class="acc-sync-btn acc-sync-btn-action"
+                                onclick={() => (conflictResolverOpen = true)}
+                                title="Resolve sync conflicts"
+                            >
+                                <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                    <line x1="12" y1="9" x2="12" y2="13"/>
+                                    <line x1="12" y1="17" x2="12.01" y2="17"/>
                                 </svg>
-                            {/if}
-                            <span>{$syncing ? "Syncing…" : "Sync"}</span>
-                        </button>
+                                <span>Action Required ({$cloudConflicts.length})</span>
+                            </button>
+                        {:else}
+                            <button
+                                class="acc-sync-btn"
+                                onclick={syncNow}
+                                disabled={$syncing}
+                                title="Sync now"
+                            >
+                                {#if $syncing}
+                                    <span
+                                        class="acc-spinner acc-spinner-light acc-spinner-tiny"
+                                    ></span>
+                                {:else}
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        width="13"
+                                        height="13"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path d="M23 4v6h-6" />
+                                        <path d="M1 20v-6h6" />
+                                        <path
+                                            d="M3.51 9a9 9 0 0114.85-3.36L23 10"
+                                        />
+                                        <path
+                                            d="M1 14l4.64 4.36A9 9 0 0020.49 15"
+                                        />
+                                    </svg>
+                                {/if}
+                                <span>{$syncing ? "Syncing…" : "Sync"}</span>
+                            </button>
+                        {/if}
                         <button
                             class="acc-kebab-btn"
                             onclick={openMenu}
@@ -620,10 +635,7 @@
                         </label>
                     </div>
                     <div class="acc-fields-footer">
-                        <p class="acc-fine">
-                            Email and handle come from your sign-in provider.
-                            Handle editing coming soon.
-                        </p>
+                        <p class="acc-fine"></p>
                         <button
                             class="acc-btn acc-btn-primary"
                             onclick={saveProfile}
@@ -748,8 +760,8 @@
                         </div>
                         <p class="acc-sub-body">
                             {$cloudPlan === "pro"
-                                ? "Premium themes and Pro features are enabled on this account."
-                                : "Upgrade to unlock premium themes and future Pro features."}
+                                ? "Pro features are enabled on this account."
+                                : "Upgrade to unlock Pro features."}
                         </p>
                     </div>
                     <button
@@ -775,12 +787,6 @@
                         >
                     </button>
                 </div>
-                {#if $cloudPlan !== "pro"}
-                    <p class="acc-fine acc-fine-quiet">
-                        Pro launches on clauge.in/pricing — one-time purchase,
-                        lifetime access.
-                    </p>
-                {/if}
             </section>
 
             <!-- Danger zone -->
@@ -892,6 +898,8 @@
         confirmPull = false;
     }}
 />
+
+<ConflictResolverModal bind:show={conflictResolverOpen} />
 
 <style>
     .acc-pane {
@@ -1154,6 +1162,18 @@
     .acc-sync-btn svg {
         flex-shrink: 0;
     }
+    /* "Action Required" variant — accent-tinted, opens the resolver. */
+    .acc-sync-btn-action {
+        background: color-mix(in srgb, var(--acc) 14%, transparent);
+        border-color: color-mix(in srgb, var(--acc) 35%, transparent);
+        color: var(--acc);
+        font-weight: 600;
+    }
+    .acc-sync-btn-action:hover {
+        background: color-mix(in srgb, var(--acc) 22%, transparent);
+        border-color: color-mix(in srgb, var(--acc) 50%, transparent);
+    }
+    .acc-sync-btn-action svg { stroke: var(--acc); }
     .acc-kebab-btn {
         display: inline-flex;
         align-items: center;

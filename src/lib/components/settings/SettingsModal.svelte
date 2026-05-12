@@ -377,6 +377,10 @@
     let accentColor = $derived(
         $appearance.accentColor || FALLBACK_ACCENT_COLOR,
     );
+    // Pro themes can lock the accent — the picker is disabled and a small
+    // note tells the user why. `getTheme()` looks up the theme registry.
+    let activeThemeDef = $derived(getTheme(currentTheme));
+    let accentLocked = $derived(activeThemeDef?.lockAccent === true);
 
     // Re-export for template usage (Svelte each blocks resolve from script scope).
     const ACCENT_COLORS = ACCENT_PALETTE;
@@ -1510,13 +1514,20 @@
 
                 <div class="stg-section">
                     <span class="stg-section-label">Accent Color</span>
-                    <div class="stg-swatches">
+                    {#if accentLocked}
+                        <div class="stg-accent-locked-note">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                            <span><strong>{activeThemeDef?.name}</strong> provides its own accent. Pick a different theme to customize.</span>
+                        </div>
+                    {/if}
+                    <div class="stg-swatches" class:stg-swatches-disabled={accentLocked}>
                         {#each ACCENT_COLORS as color}
                             <button
                                 class="stg-swatch"
                                 class:active={accentColor === color.value}
                                 style="background: {color.value}"
-                                title={color.name}
+                                title={accentLocked ? `${activeThemeDef?.name} controls the accent` : color.name}
+                                disabled={accentLocked}
                                 onclick={() => handleAccentChange(color.value)}
                             ></button>
                         {/each}

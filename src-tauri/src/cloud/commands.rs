@@ -202,6 +202,58 @@ pub async fn cloud_sync_push_now(
     sync::push_all(pool.inner(), &state, &kinds).await
 }
 
+/// List kinds currently in conflict-locked state. Used by the resolver
+/// UI to render the amber dot, the "Action Required (N)" label, and the
+/// modal body.
+#[tauri::command]
+pub async fn cloud_get_conflicts(
+    pool: State<'_, SqlitePool>,
+) -> Result<Vec<String>, String> {
+    sync::conflicted_kinds(pool.inner()).await
+}
+
+/// Resolve all conflicts by force-pushing this device's data — the user
+/// has picked "Keep my changes" in the resolver modal. Iterates all
+/// conflicted kinds; any individual failure short-circuits.
+#[tauri::command]
+pub async fn cloud_resolve_keep_local(
+    pool: State<'_, SqlitePool>,
+    state: State<'_, AuthState>,
+) -> Result<(), String> {
+    let kinds = sync::conflicted_kinds(pool.inner()).await?;
+    for k in &kinds {
+        sync::force_push_kind(pool.inner(), &state, k).await?;
+    }
+    Ok(())
+}
+
+/// Resolve all conflicts by adopting the remote — the user has picked
+/// "Use other device's" in the resolver. Pulls each conflicted kind and
+/// clears its conflict flag.
+#[tauri::command]
+pub async fn cloud_resolve_use_remote(
+    pool: State<'_, SqlitePool>,
+    state: State<'_, AuthState>,
+) -> Result<(), String> {
+    let kinds = sync::conflicted_kinds(pool.inner()).await?;
+    for k in &kinds {
+        sync::resolve_use_remote(pool.inner(), &state, k).await?;
+    }
+    Ok(())
+}
+
+/// Lightweight remote-state check used by pull-on-focus: returns the
+/// kinds where the server has moved past our last-known synced hash AND
+/// local has no unpushed changes (safe to silently pull). Caller pulls
+/// those, then re-emits cloud:synced for the frontend to refresh stamps.
+#[tauri::command]
+pub async fn cloud_pull_if_remote_newer(
+    pool: State<'_, SqlitePool>,
+    state: State<'_, AuthState>,
+) -> Result<Vec<String>, String> {
+    sync::pull_if_remote_newer(pool.inner(), &state).await
+}
+
 #[tauri::command]
 pub async fn cloud_sync_restore(
     pool: State<'_, SqlitePool>,

@@ -39,7 +39,7 @@
     const kind = item.kind === 'card' ? 'board' : 'note';
     const id = item.kind === 'card' ? item.boardId! : item.id;
     const label = item.kind === 'card' ? (item.boardName ?? 'Board') : item.label;
-    const dot = item.kind === 'card' ? '#a78bfa' : 'var(--acc)';
+    const dot = 'var(--acc)';
     const key = `${kind}:${id}`;
     const existing = get(sharedTabs).find(t => t.mode === 'workspace' && t.key === key);
     if (existing) activateTab(existing.id);
@@ -170,7 +170,7 @@
     display: inline-flex; align-items: center; justify-content: center;
     color: var(--acc); margin-top: 2px;
   }
-  .ib-row-ico.ib-row-board { color: #a78bfa; }
+  .ib-row-ico.ib-row-board { color: var(--acc); }
   .ib-row-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
   .ib-row-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
   .ib-row-label {

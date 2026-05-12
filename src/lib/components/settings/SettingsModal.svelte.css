@@ -372,6 +372,40 @@
     box-shadow: 0 0 0 2px var(--n);
   }
 
+  .stg-swatch:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .stg-swatch:disabled:hover { transform: none; }
+
+  .stg-swatches-disabled {
+    pointer-events: none;
+  }
+  .stg-swatches-disabled .stg-swatch { pointer-events: auto; }
+
+  .stg-accent-locked-note {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--acc) 25%, var(--b1));
+    background: color-mix(in srgb, var(--acc) 6%, transparent);
+    color: var(--t2);
+    font-family: var(--ui);
+    font-size: 11.5px;
+    line-height: 1.5;
+  }
+  .stg-accent-locked-note svg {
+    color: var(--acc);
+    flex-shrink: 0;
+  }
+  .stg-accent-locked-note strong {
+    color: var(--t1);
+    font-weight: 600;
+  }
+
   /* -- Shortcuts -- */
   .stg-shortcuts {
     display: flex;

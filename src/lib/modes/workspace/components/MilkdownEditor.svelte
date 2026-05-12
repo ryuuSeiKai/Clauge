@@ -28,12 +28,34 @@
   let host: HTMLDivElement;
   let crepe: Crepe | null = null;
 
+  /** Persist pasted/dragged images by embedding them as base64 data
+   *  URLs in the markdown. Crepe's default upload handler produces
+   *  `blob:` URLs which are page-session-scoped — they evaporate on
+   *  app restart, leaving broken images. Inlining as a data URL keeps
+   *  the image in the same column as the rest of the note content, so
+   *  whatever persistence the note has, the image inherits. Trade-off:
+   *  bloats the row for large images. Re-evaluate with a file-on-disk
+   *  scheme once a note shows real growth pressure. */
+  function fileToDataUrl(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(reader.error ?? new Error('image read failed'));
+      reader.readAsDataURL(file);
+    });
+  }
+
   onMount(() => {
     crepe = new Crepe({
       root: host,
       defaultValue: value,
       featureConfigs: {
         [Crepe.Feature.Placeholder]: { text: placeholder, mode: 'block' },
+        [Crepe.Feature.ImageBlock]: {
+          onUpload: fileToDataUrl,
+          blockOnUpload: fileToDataUrl,
+          inlineOnUpload: fileToDataUrl,
+        },
       },
     });
     crepe.create().then(() => {

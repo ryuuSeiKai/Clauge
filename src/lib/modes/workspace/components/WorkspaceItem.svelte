@@ -89,7 +89,7 @@
     const key = `board:${b.id}`;
     const existing = get(sharedTabs).find(t => t.mode === 'workspace' && t.key === key);
     if (existing) activateTab(existing.id);
-    else addTab(b.name, 'workspace', key, '#a78bfa');
+    else addTab(b.name, 'workspace', key, 'var(--acc)');
     mode.set('workspace');
   }
 
@@ -577,10 +577,10 @@
     height: 16px;
     display: block;
   }
-  /* Item-type tints — accent for notes, distinct purple for boards
-     so the glyph itself communicates kind even before reading the
-     name. Both stay full-opacity on hover (no fade). */
-  .ws-leaf-board { color: #a78bfa; }
+  /* Both notes and boards take the accent — workspace items share
+     one identity color (the user's chosen accent), the glyph alone
+     distinguishes kind. */
+  .ws-leaf-board { color: var(--acc); }
   .ws-leaf-note  { color: var(--acc); }
   .ws-leaf-name {
     flex: 1;

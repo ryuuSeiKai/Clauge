@@ -73,6 +73,8 @@ export const workspaceNoteUpdate = (params: {
   actor: string;
 }) => invoke<void>('workspace_note_update', params);
 export const workspaceNoteDelete = (id: string) => invoke<void>('workspace_note_delete', { id });
+export const workspaceNoteExportToFile = (path: string, content: string) =>
+  invoke<void>('workspace_note_export_to_file', { path, content });
 
 // ── Boards + columns ──────────────────────────────────────────────────
 

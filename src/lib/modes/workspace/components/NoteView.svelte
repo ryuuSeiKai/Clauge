@@ -2,8 +2,10 @@
   import { onDestroy } from 'svelte';
   import MilkdownEditor from './MilkdownEditor.svelte';
   import TagInput from './TagInput.svelte';
+  import CoworkerAvatar from './CoworkerAvatar.svelte';
   import { activeWorkspace } from '../stores';
-  import { workspaceNoteGet, workspaceNoteUpdate } from '../commands';
+  import { workspaceNoteGet, workspaceNoteUpdate, workspaceNoteExportToFile } from '../commands';
+  import { marked } from 'marked';
   import { describeActor, formatAttribution, currentUserActor } from '../attribution';
   import type { WorkspaceNote } from '../types';
   import { showToast } from '$lib/shared/primitives/toast';
@@ -165,7 +167,71 @@
     if (saveTimeout) clearTimeout(saveTimeout);
     if (dirty) saveNow();
   });
+
+  // ── Export ─────────────────────────────────────────────────────────
+  let exportMenuOpen = $state(false);
+
+  /** Wrap raw markdown HTML in a stand-alone document with enough inline
+   *  styling that the exported file looks decent on its own (any browser,
+   *  no Clauge tokens to inherit). Kept intentionally lean — headings,
+   *  code, blockquote, links, images. */
+  function buildHtmlDocument(noteTitle: string, markdown: string): string {
+    const body = marked.parse(markdown ?? '', { async: false }) as string;
+    const safeTitle = (noteTitle || 'Untitled').replace(/[<>&]/g, (c) =>
+      c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&amp;');
+    return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>${safeTitle}</title>
+<style>
+  body { font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 24px; color: #1a1a1a; }
+  h1, h2, h3 { line-height: 1.25; margin: 1.6em 0 0.5em; }
+  h1 { font-size: 2em; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3em; }
+  h2 { font-size: 1.5em; }
+  h3 { font-size: 1.2em; }
+  p { margin: 0.8em 0; }
+  a { color: #2563eb; }
+  code { background: #f3f4f6; padding: 1px 5px; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+  pre { background: #f3f4f6; padding: 14px 16px; border-radius: 6px; overflow-x: auto; }
+  pre code { background: transparent; padding: 0; }
+  blockquote { border-left: 3px solid #d1d5db; color: #4b5563; padding: 4px 14px; margin: 1em 0; }
+  img { max-width: 100%; height: auto; border-radius: 6px; }
+  hr { border: none; border-top: 1px solid #e5e7eb; margin: 2em 0; }
+  table { border-collapse: collapse; }
+  th, td { border: 1px solid #e5e7eb; padding: 6px 10px; }
+</style>
+</head>
+<body>
+<h1>${safeTitle}</h1>
+${body}
+</body>
+</html>`;
+  }
+
+  async function exportAs(kind: 'md' | 'html') {
+    exportMenuOpen = false;
+    if (!note) return;
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog');
+      const safeName = (note.title || 'note').replace(/[/\\?%*:|"<>]/g, '-');
+      const ext = kind === 'md' ? 'md' : 'html';
+      const dest = await save({
+        defaultPath: `${safeName}.${ext}`,
+        title: `Export ${note.title || 'note'}`,
+        filters: [{ name: kind === 'md' ? 'Markdown' : 'HTML', extensions: [ext] }],
+      });
+      if (typeof dest !== 'string' || !dest) return;
+      const content = kind === 'md' ? (note.content ?? '') : buildHtmlDocument(note.title, note.content ?? '');
+      await workspaceNoteExportToFile(dest, content);
+      showToast(`Exported to ${dest}`, 'success');
+    } catch (e: any) {
+      showToast(`Export failed: ${e?.message ?? e}`, 'error');
+    }
+  }
 </script>
+
+<svelte:window onclick={() => (exportMenuOpen = false)} />
 
 {#if !note}
   <div class="nv-loading">Loading…</div>
@@ -184,6 +250,31 @@
       {:else}
         <span class="nv-saved">saved</span>
       {/if}
+      <!-- svelte-ignore a11y_click_events_have_key_events -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="nv-export-wrap" onclick={(e) => e.stopPropagation()}>
+        <button
+          class="nv-export-btn"
+          title="Export note"
+          aria-label="Export note"
+          onclick={() => (exportMenuOpen = !exportMenuOpen)}
+        >
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
+        {#if exportMenuOpen}
+          <div class="nv-export-menu" role="menu">
+            <button class="nv-export-item" onclick={() => exportAs('md')}>
+              <span class="nv-export-item-label">Markdown</span>
+              <span class="nv-export-item-ext">.md</span>
+            </button>
+            <button class="nv-export-item" onclick={() => exportAs('html')}>
+              <span class="nv-export-item-label">HTML</span>
+              <span class="nv-export-item-ext">.html</span>
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
 
     <input
@@ -236,16 +327,30 @@
       <div class="nv-prop-key">UPDATED</div>
       <div class="nv-prop-val">
         <span class="nv-attr">
-          {#if editor_info.kind === 'agent'}
+          {#if editor_info.kind === 'coworker'}
+            <span class="nv-attr-badge nv-attr-user" title="Edited by @{editor_info.label}">
+              <CoworkerAvatar seed={editor_info.coworkerSeed ?? editor_info.label} style={editor_info.coworkerStyle ?? 'personas'} size={14} />
+              <span>@{editor_info.label}</span>
+            </span>
+          {:else if editor_info.kind === 'agent'}
             <span class="nv-attr-badge nv-attr-agent" title="Edited by {editor_info.label}">
               <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.8L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.2L12 3z"/></svg>
               {editor_info.label}
             </span>
-          {:else if editor_info.avatarUrl}
-            <img class="nv-attr-avatar" src={editor_info.avatarUrl} alt="" width="14" height="14"/>
-            <span>{editor_info.label}</span>
+          {:else if editor_info.kind === 'user'}
+            <span class="nv-attr-badge nv-attr-user" title="Edited by @{editor_info.label}">
+              {#if editor_info.avatarUrl}
+                <img class="nv-attr-avatar" src={editor_info.avatarUrl} alt="" width="14" height="14"/>
+              {:else}
+                <span class="nv-attr-initials">{editor_info.label.slice(0, 2).toUpperCase()}</span>
+              {/if}
+              <span>@{editor_info.label}</span>
+            </span>
           {:else}
-            <span class="nv-attr-anon">{editor_info.label}</span>
+            <span class="nv-attr-badge nv-attr-anon" title="Edited by you">
+              <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 10-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+              {editor_info.label}
+            </span>
           {/if}
           <span class="nv-attr-time">· {formatAttribution(note.updatedBy, note.updatedAt).split('· ')[1] ?? ''}</span>
         </span>
@@ -292,7 +397,73 @@
   .nv-sep { color: var(--t4); }
   .nv-saving { color: var(--warn, #f5a623); font-style: italic; }
   .nv-dirty { color: var(--t4); font-style: italic; }
-  .nv-saved { color: var(--acc); }
+
+  .nv-export-wrap {
+    position: relative;
+    margin-left: 8px;
+  }
+  .nv-export-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 24px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: 1px solid var(--b1);
+    background: transparent;
+    color: var(--t2);
+    font-family: var(--ui);
+    font-size: 11px;
+    cursor: default;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .nv-export-btn:hover {
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--t1);
+    border-color: var(--b2);
+  }
+  .nv-export-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 160px;
+    background: var(--modal-bg, #101016);
+    border: 1px solid var(--b1);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+    padding: 4px;
+    z-index: 50;
+    animation: nv-export-in 0.12s ease;
+  }
+  @keyframes nv-export-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: none; }
+  }
+  .nv-export-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    padding: 7px 10px;
+    border: none;
+    background: transparent;
+    color: var(--t1);
+    font-family: var(--ui);
+    font-size: 12px;
+    border-radius: 5px;
+    cursor: default;
+    text-align: left;
+  }
+  .nv-export-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .nv-export-item-ext {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    color: var(--t4);
+  }
+  .nv-saved { color: var(--state-saved); }
 
   .nv-title {
     border: none;
@@ -376,8 +547,23 @@
     font-size: 11.5px;
     color: var(--t2);
   }
-  .nv-attr-avatar { border-radius: 50%; }
-  .nv-attr-anon { color: var(--t3); }
+  .nv-attr-avatar { border-radius: 50%; object-fit: cover; }
+  /* Two-letter fallback when a logged-in user has no avatarUrl. */
+  .nv-attr-initials {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--acc);
+    color: #fff;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 1;
+    font-family: var(--ui);
+    flex-shrink: 0;
+  }
   .nv-attr-time { color: var(--t4); }
   .nv-attr-badge {
     display: inline-flex;
@@ -389,6 +575,11 @@
     color: var(--acc);
     font-size: 10px;
     font-weight: 500;
+  }
+  /* Anonymous (not signed in) — neutral chip, no accent fill. */
+  .nv-attr-badge.nv-attr-anon {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--t3);
   }
 
   .nv-editor {

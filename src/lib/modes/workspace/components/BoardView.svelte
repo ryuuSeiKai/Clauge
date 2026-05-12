@@ -491,13 +491,30 @@
                       <CoworkerAvatar seed={creatorCw.avatarSeed} style={creatorCw.avatarStyle} size={12} />
                       <span>@{creatorCw.name}</span>
                     </span>
+                  {:else if editor.kind === 'coworker'}
+                    <span class="bv-card-creator" title="Last edit by @{editor.label}">
+                      <CoworkerAvatar seed={editor.coworkerSeed ?? editor.label} style={editor.coworkerStyle ?? 'personas'} size={12} />
+                      <span>@{editor.label}</span>
+                    </span>
                   {:else if editor.kind === 'agent'}
                     <span class="bv-card-actor bv-card-actor-agent" title="Last edit by {editor.label}">
                       <svg viewBox="0 0 24 24" width="9" height="9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l1.6 4.8L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.2L12 3z"/></svg>
                       {editor.label}
                     </span>
+                  {:else if editor.kind === 'user'}
+                    <span class="bv-card-creator" title="Last edit by @{editor.label}">
+                      {#if editor.avatarUrl}
+                        <img class="bv-card-actor-avatar" src={editor.avatarUrl} alt="" width="12" height="12" />
+                      {:else}
+                        <span class="bv-card-actor-initials">{editor.label.slice(0, 2).toUpperCase()}</span>
+                      {/if}
+                      <span>@{editor.label}</span>
+                    </span>
                   {:else}
-                    <span class="bv-card-actor">{editor.label}</span>
+                    <span class="bv-card-actor bv-card-actor-anon" title="Last edit by you">
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21a8 8 0 10-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+                      {editor.label}
+                    </span>
                   {/if}
                   <span class="bv-card-time">· {formatAttribution(card.updatedBy, card.updatedAt).split('· ')[1] ?? ''}</span>
                   {#if card.commentCount > 0}
@@ -620,7 +637,7 @@
   }
   .bv-icon {
     display: inline-flex;
-    color: #a78bfa;
+    color: var(--acc);
   }
   /* Title input sizes to its content (size={n} attr in markup) so it
      doesn't stretch the full header. Hover/focus give a subtle box so
@@ -745,8 +762,8 @@
   }
   .bv-card:active { transform: translateY(1px); }
   .bv-card-review {
-    border-color: #a78bfa;
-    box-shadow: 0 0 0 1px rgba(167, 139, 250, 0.25);
+    border-color: var(--acc);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--acc) 25%, transparent);
   }
   .bv-card-top {
     display: flex;
@@ -782,8 +799,8 @@
     font-weight: 600;
     padding: 2px 6px;
     border-radius: 8px;
-    background: color-mix(in srgb, #a78bfa 18%, transparent);
-    color: #a78bfa;
+    background: color-mix(in srgb, var(--acc) 18%, transparent);
+    color: var(--acc);
     text-transform: uppercase;
     letter-spacing: 0.04em;
   }
@@ -842,6 +859,38 @@
     gap: 4px;
     color: var(--acc);
     font-weight: 600;
+  }
+  .bv-card-actor-avatar {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
+  /* Initials fallback — mirrors the Sidebar Avatar pattern when the
+     signed-in user has no avatarUrl (e.g. email-only login). Two
+     uppercase letters on an accent-tinted disc. */
+  .bv-card-actor-initials {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--acc);
+    color: #fff;
+    font-size: 7px;
+    font-weight: 700;
+    line-height: 1;
+    font-family: var(--ui);
+    flex-shrink: 0;
+    letter-spacing: 0;
+  }
+  .bv-card-actor-anon {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    color: var(--t3);
   }
   /* Source chip — pushed to the right edge of the foot. The two
      repo flavours get a faint brand-tinted background so users can

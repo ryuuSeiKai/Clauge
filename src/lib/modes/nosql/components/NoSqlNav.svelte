@@ -20,6 +20,7 @@
   import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import { friendlyError } from '$lib/utils/errors';
   import { showContextMenu } from '$lib/shared/primitives/contextmenu';
+  import BrandBadge from '$lib/shared/components/BrandBadge.svelte';
   import type { NoSqlConnection } from '../types';
 
   // SVG icon helpers (inline, 14x14, stroke-based)
@@ -428,9 +429,6 @@
     ]);
   }
 
-  function driverColor(driver: string): string {
-    return driver === 'redis' ? '#DC382D' : '#00ED64';
-  }
 </script>
 
 <div class="nosql-nav">
@@ -467,8 +465,8 @@
           onclick={() => handleClickConnection(conn)}
           oncontextmenu={(e) => showConnMenu(e, conn)}
         >
-          <div class="coll-icon" style:color={driverColor(conn.driver)} style:background="color-mix(in srgb, {driverColor(conn.driver)} 18%, transparent)">
-            <span class="conn-driver-text">{conn.driver === 'mongodb' ? 'MG' : 'RD'}</span>
+          <div class="coll-icon">
+            <BrandBadge brand={conn.driver} />
             {#if isConnected}<span class="conn-dot" aria-label="Connected" title="Connected"></span>{/if}
           </div>
           <div class="ncoll-text">
@@ -734,19 +732,8 @@
 
   .coll-icon {
     position: relative;
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
     display: flex;
-    align-items: center;
-    justify-content: center;
     flex-shrink: 0;
-  }
-  .conn-driver-text {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    font-family: var(--ui);
   }
   .conn-dot {
     position: absolute;

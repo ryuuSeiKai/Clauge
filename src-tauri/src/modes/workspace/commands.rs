@@ -1828,3 +1828,16 @@ pub async fn workspace_coworker_delete(
         .await
         .map_err(|e| e.to_string())
 }
+
+/// Write an exported note to the path the user picked in the save
+/// dialog. We don't ship `tauri-plugin-fs` (its scope-management cost
+/// is high for a single write), so this purpose-built command keeps
+/// the surface minimal. The path is fully controlled by the OS file
+/// picker — we just dump bytes.
+#[tauri::command]
+pub async fn workspace_note_export_to_file(
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    std::fs::write(&path, content.as_bytes()).map_err(|e| format!("write {path}: {e}"))
+}

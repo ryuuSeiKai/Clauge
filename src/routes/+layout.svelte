@@ -33,7 +33,9 @@
   import NoSqlConnectionDialog from '$lib/modes/nosql/components/ConnectionDialog.svelte';
   import { loadSettings, loadAppearance, appearance } from '$lib/stores/settings';
   import { setConnected, hasSyncedOnce, markSynced, showSyncRestorePrompt, setLastSyncedForKinds } from '$lib/stores/cloud';
-  import { cloudGetStatus, cloudCheckRemoteExists, cloudSyncPushNow } from '$lib/commands/cloud';
+  import { cloudGetStatus, cloudCheckRemoteExists, cloudSyncPushNow, cloudGetConflicts, cloudPullIfRemoteNewer } from '$lib/commands/cloud';
+  import { listen } from '@tauri-apps/api/event';
+  import { cloudConflicts } from '$lib/stores/cloud';
   import { activeModal, aiPanelOpen, mode } from '$lib/stores/app';
   import { agentSessionKey, agentCodexToken, agentFooterProvider, loadAgentUsageLimits, loadAgentClaudePlan, agentSessions, activeAgentSession } from '$lib/modes/agent/stores';
   import { sshProfiles, activeSshProfile, loadSshProfiles } from '$lib/modes/ssh/stores';
@@ -590,6 +592,54 @@
     } catch (e) {
       console.warn('[Cloud] status check failed:', e);
     }
+
+    // ── Cloud conflict subscription ───────────────────────────────────
+    // Hydrate once, then keep the store in sync with the Rust-side
+    // scheduler's `cloud:conflicts-changed` events.
+    try {
+      const initial = await cloudGetConflicts();
+      cloudConflicts.set(initial);
+    } catch (e) {
+      console.warn('[Cloud] initial conflicts load failed:', e);
+    }
+    listen<string[]>('cloud:conflicts-changed', (event) => {
+      cloudConflicts.set(event.payload ?? []);
+    }).catch((e) => console.warn('[Cloud] conflict listener failed:', e));
+
+    // ── TEMP: fake conflicts for UI testing ──────────────────────────
+    // Single-device dev workflow can't naturally trigger a 412; this
+    // injects a fake conflict set so the avatar dot, profile-menu
+    // "Action Required" row, and resolver modal can be exercised.
+    //
+    // To test:    open DevTools console and run
+    //               window.__clauge_fake_conflicts(['rest', 'ssh'])
+    //             — or any subset of:
+    //               rest, sql, nosql, agent, ssh, explorer
+    // To clear:   window.__clauge_fake_conflicts([])
+    // Notes:
+    //   - Requires you to be signed in (the dot only shows when
+    //     $cloudConnected is true).
+    //   - The Resolver modal's "Keep mine"/"Use remote" buttons will
+    //     call into Rust but no real conflict exists, so they no-op
+    //     successfully. Clear the fake conflicts manually after.
+    //   - REMOVE THIS BLOCK before shipping.
+    (window as unknown as { __clauge_fake_conflicts?: (kinds: string[]) => void })
+      .__clauge_fake_conflicts = (kinds: string[]) => {
+        cloudConflicts.set(kinds);
+        console.info('[fake-conflicts] set to', kinds);
+      };
+
+    // ── Pull-on-focus ────────────────────────────────────────────────
+    // When the user Cmd-Tabs back to Clauge, run a lightweight remote-
+    // state check and silently pull any kinds where the server has
+    // moved on AND we don't have unpushed local changes. Debounced to
+    // ≥5 minutes so rapid back-and-forth doesn't spam the Worker.
+    let lastFocusPull = 0;
+    window.addEventListener('focus', () => {
+      if (Date.now() - lastFocusPull < 5 * 60_000) return;
+      lastFocusPull = Date.now();
+      cloudPullIfRemoteNewer().catch((e) => console.warn('[Cloud] pull-on-focus:', e));
+    });
 
     // Check for updates silently on startup and show What's New if version changed
     try {

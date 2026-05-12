@@ -47,6 +47,18 @@ export const cloudSyncPushNow = () =>
 export const cloudSyncRestore = () =>
   invoke<string[]>('cloud_sync_restore');
 
+export const cloudGetConflicts = () =>
+  invoke<string[]>('cloud_get_conflicts');
+
+export const cloudResolveKeepLocal = () =>
+  invoke<void>('cloud_resolve_keep_local');
+
+export const cloudResolveUseRemote = () =>
+  invoke<void>('cloud_resolve_use_remote');
+
+export const cloudPullIfRemoteNewer = () =>
+  invoke<string[]>('cloud_pull_if_remote_newer');
+
 export const cloudLocalHasData = () =>
   invoke<boolean>('cloud_local_has_data');
 

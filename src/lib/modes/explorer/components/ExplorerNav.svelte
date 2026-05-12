@@ -16,6 +16,7 @@
   import NewFtpConnectionModal from './connection-modal/NewFtpConnectionModal.svelte';
   import NewS3ConnectionModal from './connection-modal/NewS3ConnectionModal.svelte';
   import NewAzureBlobConnectionModal from './connection-modal/NewAzureBlobConnectionModal.svelte';
+  import BrandBadge from '$lib/shared/components/BrandBadge.svelte';
   import type { ExplorerKind, ExplorerConnection } from '$lib/modes/explorer/types';
 
   // NavPanel passes the search query down (mirrors SshNav's contract).
@@ -295,18 +296,7 @@
     pendingDelete = null;
   }
 
-  // Brand-accurate identity colors per remote-storage kind. Hardcoded by
-  // design — the badge identifies *what* the thing is, not the theme.
-  function kindColor(k: ExplorerKind): string {
-    switch (k) {
-      case 'sftp':       return '#06b6d4'; // terminal cyan
-      case 'ftp':        return '#94a3b8'; // muted slate (legacy protocol)
-      case 's3':         return '#FF9900'; // AWS orange
-      case 'azure_blob': return '#0078D4'; // Azure blue
-      default:           return 'var(--t3)';
-    }
-  }
-
+  // Filter-chip label only — actual connection badges use <BrandBadge>.
   function kindBadge(k: ExplorerKind): string {
     switch (k) {
       case 'sftp': return 'SFTP';
@@ -356,11 +346,7 @@
             <div class="ncoll-text">
               <div class="ncoll-row-top">
                 <span class="ncoll-name">{conn.name}</span>
-                <span
-                  class="ncoll-badge"
-                  style:color={kindColor(conn.kind)}
-                  style:background="color-mix(in srgb, {kindColor(conn.kind)} 12%, transparent)"
-                >{kindBadge(conn.kind)}</span>
+                <BrandBadge brand={conn.kind} size={18} klass="ncoll-badge" />
               </div>
               <div class="ncoll-row-bot">
                 <span class="ncoll-sub">{subLine(conn)}</span>

@@ -173,8 +173,8 @@
     color: var(--t2);
   }
   .sb-success {
-    border-color: color-mix(in srgb, var(--ok, #1dc880) 35%, var(--b1));
-    background: color-mix(in srgb, var(--ok, #1dc880) 8%, transparent);
+    border-color: color-mix(in srgb, var(--state-saved) 35%, var(--b1));
+    background: color-mix(in srgb, var(--state-saved) 8%, transparent);
   }
   .sb-warn {
     background: rgba(255, 255, 255, 0.025);
@@ -196,7 +196,7 @@
     color: var(--t3);
     flex-shrink: 0;
   }
-  .sb-icon-ok { color: var(--ok, #1dc880); }
+  .sb-icon-ok { color: var(--state-saved); }
   .sb-icon-warn { color: var(--acc); }
   .sb-text {
     color: var(--t1);

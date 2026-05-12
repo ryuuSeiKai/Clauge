@@ -3,7 +3,15 @@
   import { mode, navOpen, aiPanelOpen, activeModal } from '$lib/stores/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { isMac, isLinux } from '$lib/utils/platform';
-  import { cloudConnected, syncing, setSyncing, setDisconnected, showSyncRestorePrompt, markSynced } from '$lib/stores/cloud';
+  import { cloudConnected, cloudConflicts, syncing, setSyncing, setDisconnected, showSyncRestorePrompt, markSynced } from '$lib/stores/cloud';
+  import ConflictResolverModal from '$lib/components/cloud/ConflictResolverModal.svelte';
+
+  let conflictResolverOpen = $state(false);
+
+  function openConflictResolver() {
+    profileMenuOpen = false;
+    conflictResolverOpen = true;
+  }
   import { cloudSyncPushNow, cloudSyncRestore, cloudLogout } from '$lib/commands/cloud';
   import { loadCollections } from '$lib/modes/rest/stores';
   import { loadEnvironments } from '$lib/modes/rest/stores';
@@ -143,7 +151,7 @@
       const pushed = await cloudSyncPushNow();
       if (pushed.length) {
         markSynced();
-        showToast(`Synced ${pushed.length} ${pushed.length === 1 ? 'domain' : 'domains'}`, 'success');
+        showToast('Synced', 'success');
       } else {
         showToast('Already up to date', 'info');
       }
@@ -291,10 +299,20 @@
               <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2z"/><path d="M7.5 12l3 3 6-6"/></svg>
               <span class="pm-sync-label">All Data Synced</span>
             </div>
-            <button class="pm-item" onclick={() => { handleSyncNow(); }}>
-              <svg class:pm-spinning={$syncing} viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-              {$syncing ? 'Syncing...' : 'Sync Now'}
-            </button>
+            {#if $cloudConflicts.length > 0}
+              <!-- Conflict-mode replacement for the Sync Now row. Same
+                   position, different label + accent treatment so the
+                   user reaches resolution from the same place. -->
+              <button class="pm-item pm-action-required" onclick={openConflictResolver}>
+                <svg viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9"  x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+                Action Required ({$cloudConflicts.length})
+              </button>
+            {:else}
+              <button class="pm-item" onclick={() => { handleSyncNow(); }}>
+                <svg class:pm-spinning={$syncing} viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+                {$syncing ? 'Syncing...' : 'Sync Now'}
+              </button>
+            {/if}
             <button class="pm-item" onclick={() => handleProfileAction('sync')}>
               <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 11-12 0 6 6 0 0112 0z"/><path d="M3 21v-2a4 4 0 014-4h10a4 4 0 014 4v2"/></svg>
               Account
@@ -343,6 +361,8 @@
     </div>
   </div>
 </aside>
+
+<ConflictResolverModal bind:show={conflictResolverOpen} />
 
 <!-- Restore confirm: when Sync Now is clicked but local is empty -->
 {#if showRestoreConfirm}
@@ -592,12 +612,12 @@
     gap: 10px;
     padding: 8px 12px;
     font-size: 11px;
-    color: var(--acc);
+    color: var(--state-saved);
     font-family: var(--ui);
   }
   .pm-sync-status svg {
     width: 14px; height: 14px; min-width: 14px;
-    stroke: var(--acc); fill: none;
+    stroke: var(--state-saved); fill: none;
     stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
     flex-shrink: 0;
   }
@@ -618,6 +638,16 @@
   .pm-coffee { color: #f5a623 !important; }
   .pm-coffee svg { stroke: #f5a623 !important; }
   .pm-coffee:hover { background: rgba(245,166,35,0.08) !important; }
+  /* "Action Required" replaces the Sync Now row when there are unresolved
+     conflicts — accent tint signals the user has a decision to make. */
+  .pm-action-required {
+    color: var(--acc) !important;
+    font-weight: 600;
+  }
+  .pm-action-required svg { stroke: var(--acc) !important; }
+  .pm-action-required:hover {
+    background: color-mix(in srgb, var(--acc) 10%, transparent) !important;
+  }
   .pm-logout { color: var(--err) !important; }
   .pm-logout svg { stroke: var(--err) !important; }
   .pm-logout:hover { background: rgba(240,68,68,0.08) !important; }

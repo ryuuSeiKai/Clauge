@@ -101,6 +101,13 @@ pub fn spawn(app: AppHandle) {
             }
 
             let kind_slice: Vec<&str> = kinds.iter().copied().collect();
+
+            // Snapshot conflicted kinds before — used to detect new conflicts
+            // post-push without plumbing AppHandle through sync.rs.
+            let pre_conflicts = crate::cloud::sync::conflicted_kinds(&pool)
+                .await
+                .unwrap_or_default();
+
             match crate::cloud::sync::push_all(&pool, &auth_state, &kind_slice).await {
                 Ok(pushed) => {
                     if !pushed.is_empty() {
@@ -114,6 +121,17 @@ pub fn spawn(app: AppHandle) {
                         dirty().lock().insert(k);
                     }
                 }
+            }
+
+            // If the conflict set changed (new conflicts appeared OR an
+            // existing one was cleared by a successful push), tell the
+            // frontend so it can refresh the resolver + amber-dot state.
+            let post_conflicts = crate::cloud::sync::conflicted_kinds(&pool)
+                .await
+                .unwrap_or_default();
+            if post_conflicts != pre_conflicts {
+                let _ = app.emit("cloud:conflicts-changed", &post_conflicts);
+                log::info!("[cloud:scheduler] conflicts now: {:?}", post_conflicts);
             }
         }
     });

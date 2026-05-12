@@ -26,3 +26,10 @@ pub fn settings_key_hash(kind: &str) -> String {
 pub fn settings_key_synced_at(kind: &str) -> String {
     format!("cloud:synced_at:{}", kind)
 }
+// Per-kind conflict flag — set when a push returned 412 and the user
+// hasn't resolved yet. Value stores the *remote* hash at conflict time,
+// so the resolver can show summary stats against the right remote blob.
+// Key format `cloud:conflict:<kind>`.
+pub fn settings_key_conflict(kind: &str) -> String {
+    format!("cloud:conflict:{}", kind)
+}

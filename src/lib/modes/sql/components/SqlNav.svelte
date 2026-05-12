@@ -14,6 +14,7 @@
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import ConfirmDialog from '$lib/shared/primitives/ConfirmDialog.svelte';
   import { showContextMenu } from '$lib/shared/primitives/contextmenu';
+  import BrandBadge from '$lib/shared/components/BrandBadge.svelte';
   import type { SqlConnectionConfig, SqlConnection, TableInfo, ColumnInfo } from '../types';
   import { descriptorFor } from '../dialects';
   import { tabs, activeTabId } from '$lib/shared/stores/tabs';
@@ -597,25 +598,6 @@ ORDER BY ordinal_position;`);
 
   // ── Helpers ──
 
-  function driverLabel(driver: string): string {
-    return descriptorFor(driver)?.abbreviation ?? (driver ? driver.substring(0, 2).toUpperCase() : '?');
-  }
-
-  // Brand-accurate identity colors for each SQL engine. Hardcoded by design —
-  // these are visual identifiers tied to the *thing*, not the theme. See
-  // accompanying NoSQL `driverColor` (Mongo green / Redis red) for the same
-  // pattern.
-  function driverColor(driver: string): string {
-    switch (driver) {
-      case 'postgresql': return '#336791';
-      case 'mysql':      return '#00758F';
-      case 'sqlite':     return '#909090';
-      case 'clickhouse': return '#FFCC01';
-      case 'd1':         return '#F38020';
-      default:           return 'var(--t3)';
-    }
-  }
-
   function columnLabel(col: ColumnInfo): string {
     let label = col.dataType;
     const tags: string[] = [];
@@ -661,8 +643,8 @@ ORDER BY ordinal_position;`);
           onclick={() => handleClickConnection(conn)}
           oncontextmenu={(e) => showConnMenu(e, conn)}
         >
-          <div class="coll-icon" style:color={driverColor(conn.driver)} style:background="color-mix(in srgb, {driverColor(conn.driver)} 18%, transparent)">
-            <span class="conn-driver-text">{driverLabel(conn.driver)}</span>
+          <div class="coll-icon">
+            <BrandBadge brand={conn.driver} />
             {#if isConnected}<span class="conn-dot" aria-label="Connected" title="Connected"></span>{/if}
           </div>
           <div class="ncoll-text">
@@ -988,19 +970,8 @@ ORDER BY ordinal_position;`);
 
   .coll-icon {
     position: relative;
-    width: 22px;
-    height: 22px;
-    border-radius: 5px;
     display: flex;
-    align-items: center;
-    justify-content: center;
     flex-shrink: 0;
-  }
-  .conn-driver-text {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    font-family: var(--ui);
   }
   .conn-dot {
     position: absolute;

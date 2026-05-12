@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { brandConfig, type BrandKey, type BrandOverride, type BrandDisplayMode } from '$lib/shared/theme/brands';
 
 export interface Theme {
   id: string;
@@ -47,6 +48,21 @@ export interface Theme {
   // that go beyond flat colors. Themes that want a static look leave this
   // undefined.
   effectClass?: string;
+  // Per-brand color/icon overrides (Postgres / MongoDB / S3 / …). When the
+  // brand registry's defaults clash with the theme palette, a theme can
+  // dim them via `intensity` or replace them entirely. See
+  // `$lib/shared/theme/brands.ts`.
+  brandOverrides?: Partial<Record<BrandKey, BrandOverride>>;
+  // Global preference for how brand badges render. 'text' keeps the
+  // current PG/MY/MG abbreviations; 'icon' swaps in the brand glyph.
+  // 'auto' currently maps to 'text'.
+  brandDisplay?: BrandDisplayMode;
+  // Theme-defined accent. When `lockAccent` is true, `applyTheme` forces
+  // `--acc` to this value and the Appearance UI disables the accent
+  // picker. Free themes leave both undefined and the user-picked accent
+  // wins.
+  accent?: string;
+  lockAccent?: boolean;
 }
 
 const themes: Record<string, Theme> = {
@@ -253,7 +269,13 @@ export function applyTheme(themeId: string, accentColor?: string) {
   root.style.setProperty('--t4', theme.textFaint);
   root.style.setProperty('--modal-bg', theme.modalBg);
 
-  if (accentColor) {
+  // Locked themes force their designer-chosen accent and ignore the
+  // user's picker. Free themes fall back to the user-supplied accent
+  // (passed in from the appearance store) or leave the previous value
+  // in place.
+  if (theme.lockAccent && theme.accent) {
+    root.style.setProperty('--acc', theme.accent);
+  } else if (accentColor) {
     root.style.setProperty('--acc', accentColor);
   }
 
@@ -264,6 +286,21 @@ export function applyTheme(themeId: string, accentColor?: string) {
   root.style.setProperty('--ok', theme.ok);
   root.style.setProperty('--warn', theme.warn);
   root.style.setProperty('--err', theme.err);
+
+  // Semantic state aliases (Phase 3). Defaults below match the prior
+  // behavior we landed manually (saved/synced follow accent; live system
+  // status keeps green via --ok). Themes can override either via
+  // brandOverrides equivalents in a later phase — for now they piggyback
+  // on --ok and --acc, which the theme already controls.
+  root.style.setProperty('--state-live', theme.ok);
+  root.style.setProperty('--state-saved', 'var(--acc)');
+  root.style.setProperty('--state-info', 'var(--acc)');
+
+  // Brand badge config — reactive store consumed by <BrandBadge>.
+  brandConfig.set({
+    overrides: theme.brandOverrides ?? {},
+    display: theme.brandDisplay ?? 'text',
+  });
 
   // Syntax token colors — read by `.str / .num / .key / .boo` in app.css
   // (the homemade JSON + document highlighters). Per-theme means each

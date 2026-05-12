@@ -52,6 +52,11 @@ export const lastSyncedByKind = writable<Record<string, string>>({});
 /** Generic "any push or pull in flight" flag for spinner states. */
 export const syncing = writable<boolean>(false);
 
+/** Kinds currently in conflict-locked state — populated by listening to
+ *  the `cloud:conflicts-changed` Tauri event. Drives the avatar amber
+ *  dot, the "Action Required (N)" profile-menu row, and the resolver. */
+export const cloudConflicts = writable<string[]>([]);
+
 /** Show the "Cloud data found — restore?" modal on first sign-in when local has rows. */
 export const showSyncRestorePrompt = writable<boolean>(false);
 

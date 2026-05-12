@@ -9,35 +9,80 @@
 
 import { get } from 'svelte/store';
 import { cloudConnected, cloudUser, cloudDisplayHandle } from '$lib/stores/cloud';
+import { coworkers } from './stores';
+
+/** Strip an email domain to keep a clean display slug
+ *  (`alex@example.com` → `alex`). Used both when picking what to write
+ *  into new attribution strings AND when rendering legacy rows that
+ *  may have stored a raw email as the login. */
+function sluggify(s: string): string {
+  const at = s.indexOf('@');
+  return at > 0 ? s.slice(0, at) : s;
+}
 
 /** The actor string for the currently signed-in human user. Read at
  *  the call site so a mid-session cloud login flips attribution from
- *  'user' to 'user:<login>' immediately. */
+ *  'user' to 'user:<login>' immediately.
+ *
+ *  Preference: `cloudUser.slug` (always clean) → display handle stripped
+ *  to its local part. We never write a raw email into the actor; legacy
+ *  rows that did are normalized at render time via `sluggify()`. */
 export function currentUserActor(): string {
   if (get(cloudConnected)) {
-    const u = get(cloudDisplayHandle);
-    if (u?.handle && u.handle.trim()) return `user:${u.handle.trim()}`;
+    const u = get(cloudUser);
+    if (u?.slug && u.slug.trim()) return `user:${u.slug.trim()}`;
+    const dh = get(cloudDisplayHandle);
+    if (dh?.handle && dh.handle.trim()) return `user:${sluggify(dh.handle.trim())}`;
   }
   return 'user';
 }
 
 /** Parse a stored actor string into render data for the UI. */
 export function describeActor(actor: string): {
-  kind: 'user' | 'user-anon' | 'agent';
+  kind: 'user' | 'user-anon' | 'agent' | 'coworker';
   label: string;
   agentId: string | null;
   avatarUrl: string | null;
+  coworkerSeed?: string;
+  coworkerStyle?: string;
 } {
   if (actor === 'user' || !actor) {
     return { kind: 'user-anon', label: 'You', agentId: null, avatarUrl: null };
   }
   if (actor.startsWith('user:')) {
     const login = actor.slice(5).trim();
-    const me = get(cloudDisplayHandle);
-    const avatar = me?.handle === login ? (get(cloudUser)?.avatarUrl ?? null) : null;
-    return { kind: 'user', label: login || 'You', agentId: null, avatarUrl: avatar };
+    const label = sluggify(login) || 'You';
+    // "Is this the currently signed-in user?" — match against the slug,
+    // the displayHandle, OR the sluggified displayHandle (handles
+    // legacy rows that stored an email). If yes, surface their real
+    // avatar URL so the chip shows their GitHub/Google picture.
+    const u = get(cloudUser);
+    const dh = get(cloudDisplayHandle)?.handle?.trim() ?? '';
+    const isMe =
+      (u?.slug && u.slug === login) ||
+      dh === login ||
+      sluggify(dh) === label;
+    const avatar = isMe ? (u?.avatarUrl ?? null) : null;
+    return { kind: 'user', label, agentId: null, avatarUrl: avatar };
   }
-  // Anything else is the agent's CLI id (claude / codex / gemini / …).
+  // Could be a coworker (persona) — name is the slug stored as the
+  // actor whenever a card mutation runs in that persona's context.
+  // Match case-insensitively against the coworker registry; if we hit,
+  // render with avatar + @name instead of the generic agent star.
+  const cw = get(coworkers).find(
+    (c) => c.name.toLowerCase() === actor.toLowerCase(),
+  );
+  if (cw) {
+    return {
+      kind: 'coworker',
+      label: cw.name,
+      agentId: null,
+      avatarUrl: null,
+      coworkerSeed: cw.avatarSeed,
+      coworkerStyle: cw.avatarStyle,
+    };
+  }
+  // Anything else is a real agent CLI id (claude / codex / gemini / …).
   return {
     kind: 'agent',
     label: actor.charAt(0).toUpperCase() + actor.slice(1),

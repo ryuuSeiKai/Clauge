@@ -17,6 +17,10 @@ pub enum CloudError {
     NotAuthenticated,
     Network(String),
     Server { status: u16, body: String },
+    /// 412 Precondition Failed from `/api/sync/push/:kind` — remote hash
+    /// doesn't match the `prevHash` we sent. Caller decides whether to
+    /// pull, prompt the user, or force-push.
+    Conflict { current_hash: Option<String>, current_updated_at: Option<String> },
 }
 
 impl std::fmt::Display for CloudError {
@@ -25,6 +29,7 @@ impl std::fmt::Display for CloudError {
             CloudError::NotAuthenticated => write!(f, "Not signed in to Clauge cloud"),
             CloudError::Network(e) => write!(f, "Network error: {}", e),
             CloudError::Server { status, body } => write!(f, "Cloud API {}: {}", status, body),
+            CloudError::Conflict { .. } => write!(f, "Remote has changed since this device last synced."),
         }
     }
 }
@@ -188,28 +193,63 @@ pub async fn sync_pull(
     get_json(pool, &path, &token, &provider).await
 }
 
+/// Push a kind blob with optimistic concurrency.
+///
+/// `prev_hash` semantics (matches the Worker side):
+///   - `None`     → first push of this kind (server requires row to not exist).
+///   - `Some("*")` → force overwrite (post-conflict "Keep my changes").
+///   - `Some(hex)` → only succeed if remote currently has that hash.
+///
+/// On 412 the server returns the current remote state; we surface it as
+/// `CloudError::Conflict` so the orchestrator can flip the kind into
+/// conflict-locked mode and the UI can show the resolver.
 pub async fn sync_push(
     pool: &SqlitePool,
     state: &AuthState,
     kind: &str,
     content_hash: &str,
     payload_b64: &str,
+    prev_hash: Option<&str>,
 ) -> Result<SyncPushResponse, CloudError> {
     let (token, provider) = state.active_token_and_provider().ok_or(CloudError::NotAuthenticated)?;
     let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
     let url = format!("{}{}/{}", API_BASE_URL, "/api/sync/push", kind);
+
+    let mut body = serde_json::Map::new();
+    body.insert("contentHash".into(), serde_json::Value::String(content_hash.into()));
+    body.insert("payload".into(), serde_json::Value::String(payload_b64.into()));
+    if let Some(p) = prev_hash {
+        body.insert("prevHash".into(), serde_json::Value::String(p.into()));
+    }
+
     let resp = client
         .put(url)
         .header("Authorization", format!("Bearer {}", token))
         .header("X-Provider", provider)
         .header("Content-Type", "application/json")
-        .json(&serde_json::json!({
-            "contentHash": content_hash,
-            "payload": payload_b64,
-        }))
+        .json(&serde_json::Value::Object(body))
         .send()
         .await
         .map_err(|e| CloudError::Network(e.to_string()))?;
+
+    // 412 → conflict. Parse the body to surface the current remote hash so
+    // the resolver can show "this device vs other device" stats.
+    if resp.status().as_u16() == 412 {
+        #[derive(serde::Deserialize)]
+        struct ConflictBody {
+            #[serde(rename = "currentHash")] current_hash: Option<String>,
+            #[serde(rename = "currentUpdatedAt")] current_updated_at: Option<String>,
+        }
+        let body: ConflictBody = resp.json().await.unwrap_or(ConflictBody {
+            current_hash: None,
+            current_updated_at: None,
+        });
+        return Err(CloudError::Conflict {
+            current_hash: body.current_hash,
+            current_updated_at: body.current_updated_at,
+        });
+    }
+
     check_ok(resp).await
 }
 

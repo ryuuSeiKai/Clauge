@@ -4,42 +4,93 @@
 use sqlx::SqlitePool;
 
 use crate::cloud::auth::AuthState;
-use crate::cloud::client;
-use crate::cloud::config::{settings_key_hash, settings_key_synced_at};
+use crate::cloud::client::{self, CloudError};
+use crate::cloud::config::{settings_key_conflict, settings_key_hash, settings_key_synced_at};
 use crate::cloud::domains::{export_kind, import_kind, ALL_KINDS};
 use crate::shared::repos::settings;
 
-/// Push a single kind. Skips the request entirely if the hash matches what we
-/// last pushed (true no-op, no network call).
+async fn clear_conflict_flag(pool: &SqlitePool, kind: &str) -> Result<(), String> {
+    sqlx::query("DELETE FROM settings WHERE key = ?")
+        .bind(settings_key_conflict(kind))
+        .execute(pool)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("clear conflict flag: {}", e))
+}
+
+/// Outcome of a push attempt for one kind. Push paths return this instead
+/// of a bare bool so the scheduler can keep going on remaining kinds when
+/// one hits a 412.
+pub enum PushOutcome {
+    /// Hash matched the server / local — no network or no-op.
+    NoChange,
+    /// Pushed and accepted.
+    Pushed,
+    /// Server returned 412 — kind is now conflict-locked locally.
+    Conflict { remote_hash: Option<String> },
+}
+
+/// Push a single kind.
+///
+/// `force_overwrite=true` sends `prevHash:'*'` — used by the conflict
+/// resolver's "Keep my changes" path. Otherwise we send the last hash
+/// we know the server had so concurrent writes from another device are
+/// detected as 412.
 pub async fn push_kind(
     pool: &SqlitePool,
     state: &AuthState,
     kind: &str,
-) -> Result<bool, String> {
+    force_overwrite: bool,
+) -> Result<PushOutcome, String> {
     let (hash, payload_b64) = export_kind(pool, kind).await?;
 
     let last = settings::get_by_key(pool, &settings_key_hash(kind))
         .await
         .map_err(|e| format!("read last hash: {}", e))?
         .map(|s| s.value);
-    if last.as_deref() == Some(hash.as_str()) {
-        return Ok(false); // no change
+    if !force_overwrite && last.as_deref() == Some(hash.as_str()) {
+        return Ok(PushOutcome::NoChange);
     }
 
-    let resp = client::sync_push(pool, state, kind, &hash, &payload_b64)
-        .await
-        .map_err(String::from)?;
+    // `prev_hash` choice:
+    //   - force overwrite (resolver "Keep my changes") → "*"
+    //   - we have a previous hash on file               → that hash
+    //   - no previous hash (first push on this device)  → None
+    let prev_hash_owned: Option<String> = if force_overwrite {
+        Some("*".to_string())
+    } else {
+        last
+    };
+    let prev_hash = prev_hash_owned.as_deref();
 
-    settings::upsert(pool, &settings_key_hash(kind), &hash)
-        .await
-        .map_err(|e| format!("store hash: {}", e))?;
-    settings::upsert(pool, &settings_key_synced_at(kind), &resp.updated_at)
-        .await
-        .map_err(|e| format!("store synced_at: {}", e))?;
-    Ok(true)
+    match client::sync_push(pool, state, kind, &hash, &payload_b64, prev_hash).await {
+        Ok(resp) => {
+            settings::upsert(pool, &settings_key_hash(kind), &hash)
+                .await
+                .map_err(|e| format!("store hash: {}", e))?;
+            settings::upsert(pool, &settings_key_synced_at(kind), &resp.updated_at)
+                .await
+                .map_err(|e| format!("store synced_at: {}", e))?;
+            // Successful push clears any pre-existing conflict flag for this kind.
+            let _ = clear_conflict_flag(pool, kind).await;
+            Ok(PushOutcome::Pushed)
+        }
+        Err(CloudError::Conflict { current_hash, .. }) => {
+            // Park this kind in conflict-locked state. The flag's value is the
+            // remote hash, so the resolver can fetch & summarise the right blob.
+            let marker = current_hash.clone().unwrap_or_else(|| "unknown".to_string());
+            settings::upsert(pool, &settings_key_conflict(kind), &marker)
+                .await
+                .map_err(|e| format!("store conflict marker: {}", e))?;
+            Ok(PushOutcome::Conflict { remote_hash: current_hash })
+        }
+        Err(e) => Err(e.to_string()),
+    }
 }
 
-/// Push every kind that's currently flagged dirty (or, if `force`, all of them).
+/// Push every kind in `kinds`. Returns the list of kinds that actually
+/// pushed bytes (excludes no-ops and conflicts). Conflicts don't short-
+/// circuit — sibling kinds still push.
 pub async fn push_all(
     pool: &SqlitePool,
     state: &AuthState,
@@ -47,11 +98,102 @@ pub async fn push_all(
 ) -> Result<Vec<String>, String> {
     let mut pushed = Vec::new();
     for k in kinds {
-        if push_kind(pool, state, k).await? {
-            pushed.push(k.to_string());
+        // Skip kinds that are already in conflict — they must be resolved
+        // before another push attempt makes sense.
+        let conflicted = settings::get_by_key(pool, &settings_key_conflict(k))
+            .await
+            .map_err(|e| format!("read conflict flag: {}", e))?
+            .is_some();
+        if conflicted {
+            continue;
+        }
+        match push_kind(pool, state, k, false).await? {
+            PushOutcome::Pushed => pushed.push(k.to_string()),
+            PushOutcome::NoChange | PushOutcome::Conflict { .. } => {}
         }
     }
     Ok(pushed)
+}
+
+/// Force-push a kind in conflict — used by the resolver's "Keep my changes"
+/// action. Returns the new server-reported updated_at on success.
+pub async fn force_push_kind(
+    pool: &SqlitePool,
+    state: &AuthState,
+    kind: &str,
+) -> Result<(), String> {
+    match push_kind(pool, state, kind, true).await? {
+        PushOutcome::Pushed | PushOutcome::NoChange => Ok(()),
+        PushOutcome::Conflict { .. } => {
+            // 412 even with prev='*' shouldn't happen, but surface a clear error.
+            Err("server refused force-push".to_string())
+        }
+    }
+}
+
+/// Resolve a conflict by adopting the remote — pulls the remote blob,
+/// imports it locally, and clears the conflict flag.
+pub async fn resolve_use_remote(
+    pool: &SqlitePool,
+    state: &AuthState,
+    kind: &str,
+) -> Result<(), String> {
+    pull_kind(pool, state, kind).await?;
+    let _ = clear_conflict_flag(pool, kind).await;
+    Ok(())
+}
+
+/// Safe auto-pull triggered on app focus.
+///
+/// For each kind the server has, compare the remote hash to our last-known
+/// remote hash. If they differ AND local hasn't diverged (current export
+/// hash == last-known remote hash → no unpushed changes), pull the new
+/// remote. Kinds with local divergence are skipped — those need to go
+/// through the normal push path, where 412 will surface as a conflict
+/// the user resolves explicitly.
+pub async fn pull_if_remote_newer(
+    pool: &SqlitePool,
+    state: &AuthState,
+) -> Result<Vec<String>, String> {
+    let remote_rows = client::sync_state(pool, state).await.map_err(String::from)?;
+    let mut pulled = Vec::new();
+    for row in remote_rows {
+        // Local last-known remote hash for this kind.
+        let last_known = settings::get_by_key(pool, &settings_key_hash(&row.kind))
+            .await
+            .map_err(|e| format!("read last hash: {}", e))?
+            .map(|s| s.value);
+
+        // Skip if server hash equals what we last saw — nothing new.
+        if last_known.as_deref() == Some(row.content_hash.as_str()) {
+            continue;
+        }
+
+        // Skip if local has diverged — the push path is responsible for that
+        // case, and will surface it as a conflict if needed.
+        let (local_hash, _) = export_kind(pool, &row.kind).await?;
+        if Some(local_hash.as_str()) != last_known.as_deref() {
+            continue;
+        }
+
+        pull_kind(pool, state, &row.kind).await?;
+        pulled.push(row.kind);
+    }
+    Ok(pulled)
+}
+
+/// List kinds currently in conflict-locked state.
+pub async fn conflicted_kinds(pool: &SqlitePool) -> Result<Vec<String>, String> {
+    let mut out = Vec::new();
+    for k in ALL_KINDS {
+        let row = settings::get_by_key(pool, &settings_key_conflict(k))
+            .await
+            .map_err(|e| format!("read conflict flag: {}", e))?;
+        if row.is_some() {
+            out.push((*k).to_string());
+        }
+    }
+    Ok(out)
 }
 
 /// Pull one kind from the server, decode, import. Updates the local hash to

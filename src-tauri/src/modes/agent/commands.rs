@@ -42,7 +42,8 @@ pub async fn agent_create_session(
     )
     .await
     .map_err(|e| e.to_string())?;
-    crate::cloud::scheduler::bump("agent");
+    // Sessions are machine-local — only agent_contexts travel through
+    // cloud sync, so no `bump("agent")` here.
     sessions_repo::get_session_by_id(pool.inner(), &id).await.map_err(|e| e.to_string())
 }
 
@@ -68,14 +69,12 @@ pub async fn agent_update_session(
     if let Some(ref prompt) = context_prompt {
         sessions_repo::update_session_context_prompt(pool.inner(), &id, prompt).await.map_err(|e| e.to_string())?;
     }
-    crate::cloud::scheduler::bump("agent");
     Ok(())
 }
 
 #[tauri::command]
 pub async fn agent_delete_session(pool: State<'_, SqlitePool>, id: String) -> Result<(), String> {
     sessions_repo::delete_session(pool.inner(), &id).await.map_err(|e| e.to_string())?;
-    crate::cloud::scheduler::bump("agent");
     Ok(())
 }
 
