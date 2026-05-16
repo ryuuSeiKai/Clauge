@@ -360,7 +360,20 @@ pub async fn sync_wipe(pool: &SqlitePool, state: &AuthState) -> Result<(), Cloud
 
 // ─── Internals ──────────────────────────────────────────────────────────────
 
-async fn post_json_no_auth<T: DeserializeOwned>(
+pub(crate) async fn get_json_no_auth<T: DeserializeOwned>(
+    pool: &SqlitePool,
+    path: &str,
+) -> Result<T, CloudError> {
+    let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
+    let resp = client
+        .get(format!("{}{}", API_BASE_URL, path))
+        .send()
+        .await
+        .map_err(|e| CloudError::Network(e.to_string()))?;
+    check_ok(resp).await
+}
+
+pub(crate) async fn post_json_no_auth<T: DeserializeOwned>(
     pool: &SqlitePool,
     path: &str,
     body: serde_json::Value,
@@ -376,7 +389,7 @@ async fn post_json_no_auth<T: DeserializeOwned>(
     check_ok(resp).await
 }
 
-async fn post_json_auth<T: DeserializeOwned>(
+pub(crate) async fn post_json_auth<T: DeserializeOwned>(
     pool: &SqlitePool,
     path: &str,
     body: serde_json::Value,
