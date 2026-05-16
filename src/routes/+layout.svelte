@@ -862,6 +862,21 @@
             cloudConflicts.set(event.payload ?? []);
         }).catch((e) => console.warn("[Cloud] conflict listener failed:", e));
 
+        // ── REST: refresh on MCP-driven mutations ─────────────────────
+        // Existing Tauri commands don't emit events because the frontend
+        // re-fetches itself after its own calls. MCP writes (agent →
+        // workspace MCP server → REST repos) bypass that loop, so we
+        // listen here and reload the matching store. Payload:
+        // `{ kind: 'collections' | 'requests', collectionId?: string }`.
+        listen<{ kind: string; collectionId: string | null }>("rest:changed", async (event) => {
+            try {
+                const { loadCollections } = await import("$lib/modes/rest/stores");
+                await loadCollections();
+            } catch (e) {
+                console.warn("[REST] refresh-on-change failed:", e);
+            }
+        }).catch((e) => console.warn("[REST] change listener failed:", e));
+
         // ── Pull-on-focus ────────────────────────────────────────────────
         // When the user Cmd-Tabs back to Clauge, run a lightweight remote-
         // state check and silently pull any kinds where the server has

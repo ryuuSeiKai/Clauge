@@ -1112,6 +1112,262 @@ pub(super) async fn dispatch_tool(
             })))
         }
 
+        // ── REST mode CRUD ────────────────────────────────────────
+        // Lets an agent sync API endpoints from a project's code into
+        // Clauge's REST mode. Five primitives — agent decides which
+        // combination matches the user's ask (add to existing
+        // collection, create+add to new collection, etc.).
+        "rest_collections_list" => {
+            let v = crate::shared::repos::collections::list_all(pool)
+                .await
+                .map_err(map_db)?;
+            Ok(ok_text(serde_json::to_value(v).unwrap_or(Value::Null)))
+        }
+        "rest_collection_create" => {
+            let collection_name = req_str("name")?;
+            if collection_name.trim().is_empty() {
+                return Err((-32602, "name cannot be empty".into()));
+            }
+            let id = new_id();
+            let max_order = crate::shared::repos::collections::max_sort_order(pool)
+                .await
+                .map_err(map_db)?;
+            crate::shared::repos::collections::insert(pool, &id, collection_name.trim(), max_order.0 + 1)
+                .await
+                .map_err(map_db)?;
+            // Optional description — if the agent passed one, patch it
+            // in. The existing `insert` repo helper doesn't take
+            // description (UI never sets it on create either), so we
+            // do a focused UPDATE rather than reshape the repo API.
+            if let Some(desc) = str_arg("description").filter(|s| !s.is_empty()) {
+                sqlx::query("UPDATE collections SET description = ?, updated_at = datetime('now') WHERE id = ?")
+                    .bind(&desc)
+                    .bind(&id)
+                    .execute(pool)
+                    .await
+                    .map_err(map_db)?;
+            }
+            crate::cloud::scheduler::bump("rest");
+            emit_rest_changed(app, "collections", None);
+            let row = crate::shared::repos::collections::get_by_id(pool, &id)
+                .await
+                .map_err(map_db)?;
+            Ok(ok_text(serde_json::to_value(row).unwrap_or(Value::Null)))
+        }
+        "rest_requests_list" => {
+            let collection_id = req_str("collectionId")?;
+            let v = crate::shared::repos::requests::list_by_collection(pool, &collection_id)
+                .await
+                .map_err(map_db)?;
+            Ok(ok_text(serde_json::to_value(v).unwrap_or(Value::Null)))
+        }
+        "rest_request_create" => {
+            let collection_id = req_str("collectionId")?;
+            let request_name = req_str("name")?;
+            if request_name.trim().is_empty() {
+                return Err((-32602, "name cannot be empty".into()));
+            }
+            // Verify the collection exists upfront so we can return a
+            // friendly error instead of a foreign-key violation later.
+            crate::shared::repos::collections::get_by_id(pool, &collection_id)
+                .await
+                .map_err(|_| (-32602, format!("collectionId {} does not exist", collection_id)))?;
+            let method = req_str("method")?.trim().to_uppercase();
+            if method.is_empty() {
+                return Err((-32602, "method cannot be empty".into()));
+            }
+            let url = str_arg("url").unwrap_or_default();
+            let body = str_arg("body").unwrap_or_default();
+            // body_type default: 'none' when there's no body, 'json' when
+            // there is one but the caller didn't pick a type. Storing
+            // 'none' alongside a non-empty body would hide the body
+            // editor in the UI — user would see the saved body but have
+            // no way to edit it. 'json' matches the DB-level default and
+            // is the common case for agent-created APIs.
+            let body_type = str_arg("bodyType")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| if body.is_empty() { "none" } else { "json" }.to_string());
+            let auth_type = str_arg("authType")
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "none".to_string());
+            // auth_data must be valid JSON — the UI does
+            // `JSON.parse(auth_data)` to render the auth editor. '{}'
+            // matches the schema default; we validate-parse any caller-
+            // provided value to catch garbage before it lands in the DB
+            // and crashes the UI later.
+            let auth_data = match str_arg("authData") {
+                Some(s) if !s.is_empty() => {
+                    serde_json::from_str::<serde_json::Value>(&s)
+                        .map_err(|e| (-32602, format!("authData must be valid JSON: {}", e)))?;
+                    s
+                }
+                _ => "{}".to_string(),
+            };
+            let pre_script = String::new();
+            let description = str_arg("description").unwrap_or_default();
+
+            let id = new_id();
+            let max_order = crate::shared::repos::requests::max_sort_order(pool, &collection_id)
+                .await
+                .map_err(map_db)?;
+            crate::shared::repos::requests::insert_full(
+                pool,
+                &id,
+                &collection_id,
+                request_name.trim(),
+                &description,
+                &method,
+                &url,
+                &body,
+                &body_type,
+                &auth_type,
+                &auth_data,
+                &pre_script,
+                max_order.0 + 1,
+            )
+            .await
+            .map_err(map_db)?;
+            // Headers + query params, if supplied. Each entry is a
+            // {key,value,enabled?} object; `enabled` defaults to true so
+            // the agent doesn't have to spell it out for every row.
+            apply_kv_list(pool, &id, args.get("headers"), KvKind::Header).await?;
+            apply_kv_list(pool, &id, args.get("queryParams"), KvKind::Param).await?;
+            crate::cloud::scheduler::bump("rest");
+            emit_rest_changed(app, "requests", Some(&collection_id));
+            let row = crate::shared::repos::requests::get_by_id(pool, &id)
+                .await
+                .map_err(map_db)?;
+            Ok(ok_text(serde_json::to_value(row).unwrap_or(Value::Null)))
+        }
+        "rest_request_update" => {
+            let id = req_str("id")?;
+            // Existence check before any mutation. Without this an
+            // update on a wrong id silently no-ops then the post-update
+            // get_by_id throws "no rows" — a confusing error to surface
+            // to an agent.
+            let existing = crate::shared::repos::requests::get_by_id(pool, &id)
+                .await
+                .map_err(|_| (-32602, format!("request id {} does not exist", id)))?;
+            // Build dynamic SET clause from any of the simple fields
+            // the caller provided. Omitting a field leaves it
+            // untouched (matches the existing UI behaviour).
+            // authData gets JSON-validated up-front so we don't
+            // poison the DB with un-parseable strings.
+            if let Some(s) = str_arg("authData") {
+                if !s.is_empty() {
+                    serde_json::from_str::<serde_json::Value>(&s)
+                        .map_err(|e| (-32602, format!("authData must be valid JSON: {}", e)))?;
+                }
+            }
+            let mut sets: Vec<String> = Vec::new();
+            let mut values: Vec<String> = Vec::new();
+            for (k, col) in [
+                ("name", "name"),
+                ("method", "method"),
+                ("url", "url"),
+                ("body", "body"),
+                ("bodyType", "body_type"),
+                ("authType", "auth_type"),
+                ("authData", "auth_data"),
+                ("description", "description"),
+            ] {
+                if let Some(v) = str_arg(k) {
+                    let v = if k == "method" { v.trim().to_uppercase() } else { v };
+                    sets.push(format!("{} = ?", col));
+                    values.push(v);
+                }
+            }
+            if !sets.is_empty() {
+                crate::shared::repos::requests::update_dynamic(pool, &sets, &values, &id)
+                    .await
+                    .map_err(map_db)?;
+            }
+            if args.get("headers").is_some() {
+                apply_kv_list(pool, &id, args.get("headers"), KvKind::Header).await?;
+            }
+            if args.get("queryParams").is_some() {
+                apply_kv_list(pool, &id, args.get("queryParams"), KvKind::Param).await?;
+            }
+            crate::cloud::scheduler::bump("rest");
+            emit_rest_changed(app, "requests", Some(&existing.collection_id));
+            let row = crate::shared::repos::requests::get_by_id(pool, &id)
+                .await
+                .map_err(map_db)?;
+            Ok(ok_text(serde_json::to_value(row).unwrap_or(Value::Null)))
+        }
+
         _ => Err((-32601, format!("Tool not found: {}", name))),
     }
+}
+
+/// Emit a Tauri event so the REST mode's frontend stores re-fetch.
+/// Without this, an agent-driven create/update via MCP doesn't reach
+/// the UI until the user manually reloads — the existing Tauri
+/// commands skip this because the frontend already refreshes itself
+/// after its own calls, but MCP bypasses that loop entirely.
+fn emit_rest_changed(
+    app: Option<&tauri::AppHandle>,
+    kind: &str,
+    collection_id: Option<&str>,
+) {
+    use tauri::Emitter;
+    if let Some(a) = app {
+        let _ = a.emit(
+            "rest:changed",
+            serde_json::json!({ "kind": kind, "collectionId": collection_id }),
+        );
+    }
+}
+
+enum KvKind { Header, Param }
+
+/// Replace the header/param list for a request with the supplied
+/// array. None / null / non-array → no-op. Matches the existing UI's
+/// "delete and re-insert in order" semantics, including `enabled`
+/// defaulting to true.
+async fn apply_kv_list(
+    pool: &SqlitePool,
+    request_id: &str,
+    value: Option<&Value>,
+    kind: KvKind,
+) -> Result<(), (i32, String)> {
+    let map_db = |e: sqlx::Error| -> (i32, String) { (-32603, format!("DB error: {}", e)) };
+    let arr = match value.and_then(|v| v.as_array()) {
+        Some(a) => a,
+        None => return Ok(()),
+    };
+    match kind {
+        KvKind::Header => crate::shared::repos::requests::delete_headers_for_request(pool, request_id)
+            .await
+            .map_err(map_db)?,
+        KvKind::Param => crate::shared::repos::requests::delete_params_for_request(pool, request_id)
+            .await
+            .map_err(map_db)?,
+    }
+    for (i, item) in arr.iter().enumerate() {
+        let key = item.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        let val = item.get("value").and_then(|v| v.as_str()).unwrap_or("");
+        if key.is_empty() {
+            continue;
+        }
+        let enabled_bool = item
+            .get("enabled")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let enabled = if enabled_bool { 1 } else { 0 };
+        let row_id = uuid::Uuid::new_v4().to_string();
+        match kind {
+            KvKind::Header => crate::shared::repos::requests::insert_header(
+                pool, &row_id, request_id, key, val, enabled, i as i32,
+            )
+            .await
+            .map_err(map_db)?,
+            KvKind::Param => crate::shared::repos::requests::insert_param(
+                pool, &row_id, request_id, key, val, enabled, i as i32,
+            )
+            .await
+            .map_err(map_db)?,
+        }
+    }
+    Ok(())
 }

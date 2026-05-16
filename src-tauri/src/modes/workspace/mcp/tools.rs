@@ -14,6 +14,7 @@ pub(super) fn tool_descriptors() -> Value {
     tools.extend(card_schemas());
     tools.extend(shipping_schemas());
     tools.extend(meta_schemas());
+    tools.extend(rest_schemas());
     Value::Array(tools)
 }
 
@@ -644,6 +645,148 @@ fn meta_schemas() -> Vec<Value> {
             "name": "coworkers_list",
             "description": "List all coworkers (personas) the user has set up. Each coworker has a name, role, system_prompt that's appended at agent spawn, avatar, and underlying provider. Use this to know who's on the team — e.g. when the user asks 'who's working with me?'.",
             "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        }
+        ),
+    ]
+}
+
+/// REST mode — collection + request CRUD. Lets an agent sync API
+/// endpoints from a project's code into Clauge's REST mode. Typical
+/// flows the user will trigger via prompt:
+///   • "add all auth endpoints to the Auth collection"
+///   • "create an Orders collection and put the new /orders APIs there"
+///   • "I just added POST /v2/users — add it to REST"
+/// The tools are CRUD primitives; the agent decides which combination
+/// to call based on what the user asks for. ONLY call when the user
+/// explicitly requests it — never re-sync collections autonomously.
+fn rest_schemas() -> Vec<Value> {
+    vec![
+        json!(
+        {
+            "name": "rest_collections_list",
+            "description": "List every REST collection the user has. Returns id, name, env_id (current environment binding, may be null), and sort_order. Call this FIRST when the user asks to add APIs to a named collection — match by case-insensitive name; only create a new collection (rest_collection_create) when no existing one matches the user's intent.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] }
+        }
+        ),
+        json!(
+        {
+            "name": "rest_collection_create",
+            "description": "Create a new REST collection. Use sparingly — prefer adding requests to an existing collection unless the user explicitly asked for a new one ('create an Auth collection', 'put these in a new collection called X'). Returns the new collection's full row including id, which you'll use as `collectionId` on subsequent rest_request_create calls. Errors if `name` is empty / whitespace-only.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Collection name. Title-case is conventional ('Auth', 'Users', 'Orders'). Must be non-empty." },
+                    "description": { "type": "string", "description": "Optional short blurb shown in the collection header — e.g. 'Login / signup / token refresh endpoints'. Defaults to empty." }
+                },
+                "required": ["name"]
+            }
+        }
+        ),
+        json!(
+        {
+            "name": "rest_requests_list",
+            "description": "List every request in a collection — id, name, method, url, sort order. Use to check for duplicates before adding (e.g. don't re-add `POST /auth/login` if one already exists), or when the user asks 'what's in the Auth collection?'.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "collectionId": { "type": "string", "description": "Collection id from rest_collections_list." }
+                },
+                "required": ["collectionId"]
+            }
+        }
+        ),
+        json!(
+        {
+            "name": "rest_request_create",
+            "description": "Add a single API request to a collection. All fields except `collectionId`, `name`, `method` are optional. Use a descriptive name that matches what the user will recognise ('Login', 'Create Order', 'Get User by ID') rather than the raw path. Headers + queryParams are arrays of {key,value,enabled?}. body is a string — for JSON bodies, send the JSON as a string and set bodyType to 'json'. authData must be valid JSON if provided (use '{}' for empty). Errors if `name` is empty or `collectionId` doesn't exist. Returns the new request row including id.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "collectionId": { "type": "string", "description": "Target collection id from rest_collections_list / rest_collection_create. Must exist." },
+                    "name": { "type": "string", "description": "Display name in the request tree (e.g. 'Login'). Must be non-empty." },
+                    "method": { "type": "string", "description": "HTTP method — GET / POST / PUT / PATCH / DELETE / HEAD / OPTIONS. Case-insensitive; gets uppercased server-side." },
+                    "description": { "type": "string", "description": "Optional short note shown under the request name. Defaults to empty." },
+                    "url": { "type": "string", "description": "Full URL. May reference environment variables as {{baseUrl}}/auth/login." },
+                    "body": { "type": "string", "description": "Request body as a string. JSON bodies should be the JSON text itself; bodyType chooses how the UI renders the editor." },
+                    "bodyType": { "type": "string", "description": "'json' | 'text' | 'xml' | 'urlencoded' | 'multipart' | 'none'. Defaults to 'none'." },
+                    "headers": {
+                        "type": "array",
+                        "description": "Request headers. Each item is { key, value, enabled?: true }.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
+                    "queryParams": {
+                        "type": "array",
+                        "description": "Query-string params. Same shape as headers.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
+                    "authType": { "type": "string", "description": "'none' | 'bearer' | 'basic' | 'apiKey'. Defaults to 'none'." },
+                    "authData": { "type": "string", "description": "Auth payload as a JSON-encoded string. Shape depends on authType — e.g. bearer: '{\"token\":\"...\"}', basic: '{\"username\":\"...\",\"password\":\"...\"}'. Reference {{envVar}} where you'd hard-code a secret. MUST be valid JSON when provided; defaults to '{}' if omitted." }
+                },
+                "required": ["collectionId", "name", "method"]
+            }
+        }
+        ),
+        json!(
+        {
+            "name": "rest_request_update",
+            "description": "Update an existing request. Any field you omit is left alone. Pass `headers` / `queryParams` arrays to REPLACE the existing lists (omit them to keep the existing ones — they're not merged, so don't send a partial array thinking it appends). Use for adjusting a URL, swapping a method, fixing a body, etc. Errors if `id` doesn't exist or `authData` is provided but not valid JSON.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "string", "description": "Request id from rest_requests_list / rest_request_create. Must exist." },
+                    "name": { "type": "string" },
+                    "method": { "type": "string", "description": "Case-insensitive; gets uppercased server-side." },
+                    "url": { "type": "string" },
+                    "body": { "type": "string" },
+                    "bodyType": { "type": "string" },
+                    "description": { "type": "string", "description": "Short note shown under the request name." },
+                    "headers": {
+                        "type": "array",
+                        "description": "REPLACES the existing header list. Omit to leave headers untouched.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
+                    "queryParams": {
+                        "type": "array",
+                        "description": "REPLACES the existing query-param list. Omit to leave them untouched.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "value": { "type": "string" },
+                                "enabled": { "type": "boolean" }
+                            },
+                            "required": ["key", "value"]
+                        }
+                    },
+                    "authType": { "type": "string" },
+                    "authData": { "type": "string" }
+                },
+                "required": ["id"]
+            }
         }
         ),
     ]
