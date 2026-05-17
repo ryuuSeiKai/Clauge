@@ -535,16 +535,8 @@
         await loadAiConfigs();
     }
 
-    async function handleUpgradeClick() {
-        try {
-            const url = await invoke<string>("cloud_create_checkout", {
-                plan: "monthly",
-            });
-            const { openUrl } = await import("@tauri-apps/plugin-opener");
-            await openUrl(url);
-        } catch (e) {
-            console.error("checkout failed", e);
-        }
+    function handleUpgradeClick() {
+        upgradeModalOpen.set(true);
     }
 
     async function handleManageClick() {

@@ -91,7 +91,14 @@
 
       <div class="head">
         <h2>Upgrade to Clauge Pro</h2>
-        <p class="sub">Unlock Clauge AI credits, unlimited coworkers, and premium themes.</p>
+        <p class="sub">Everything you get on Pro:</p>
+        <ul class="feature-list">
+          <li><span class="feat-icon">✦</span> <span><strong>Clauge AI</strong> — managed AI assistance, no API key setup</span></li>
+          <li><span class="feat-icon">✦</span> <span><strong>1,000 credits / month</strong> on monthly · <strong>12,000 / year</strong> on yearly</span></li>
+          <li><span class="feat-icon">✦</span> <span><strong>Unlimited coworkers</strong> in workspaces (free is capped at 3)</span></li>
+          <li><span class="feat-icon">✦</span> <span><strong>Premium themes</strong> — Aurora Drift, Carbon Grain, CRT Phosphor</span></li>
+          <li><span class="feat-icon">✦</span> <span>Cancel anytime. Credits are non-refundable once used.</span></li>
+        </ul>
       </div>
 
       {#if loading}
@@ -160,7 +167,7 @@
         </div>
 
         <p class="footer-note muted">
-          You'll complete checkout in your browser. We use Polar.sh as our payment processor.
+          Checkout opens securely in your browser.
         </p>
       {/if}
     </div>
@@ -203,6 +210,32 @@
   }
   .head {
     margin-bottom: 1.5rem;
+  }
+  .feature-list {
+    list-style: none;
+    padding: 0;
+    margin: 0.75rem 0 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .feature-list li {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: var(--t2, #aaa);
+    line-height: 1.4;
+  }
+  .feature-list strong {
+    color: var(--t1, #ddd);
+    font-weight: 600;
+  }
+  .feat-icon {
+    color: var(--acc, #4a90e2);
+    flex: 0 0 auto;
+    font-size: 0.85rem;
+    line-height: 1.4;
   }
   .head h2 {
     margin: 0 0 0.25rem;
