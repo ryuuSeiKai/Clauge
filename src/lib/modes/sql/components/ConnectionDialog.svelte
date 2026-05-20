@@ -1,0 +1,543 @@
+<script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
+  import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+  import Modal from '$lib/shared/primitives/Modal.svelte';
+  import type { SqlConnectionConfig, SqlDriver, SqlConnection } from '../types';
+  import { SQL_DIALECTS, defaultPortFor, descriptorFor } from '../dialects';
+  import { sqlTestConnection } from '../commands';
+  import { showToast } from '$lib/shared/primitives/toast';
+  import { sshProfiles, loadSshProfiles } from '$lib/modes/ssh/stores';
+  import type { SshProfile } from '$lib/modes/ssh/types';
+  import NewSshProfileModal from '$lib/modes/ssh/components/NewSshProfileModal.svelte';
+
+  interface Props {
+    show: boolean;
+    editConnection?: SqlConnection | null;
+    onsave?: (config: SqlConnectionConfig) => void;
+    onclose?: () => void;
+  }
+
+  let { show = $bindable(false), editConnection = null, onsave, onclose }: Props = $props();
+
+  // Default new-connection driver — first registered dialect.
+  const DEFAULT_DRIVER: SqlDriver = SQL_DIALECTS[0].key;
+  const DEFAULT_PORT = SQL_DIALECTS[0].defaultPort;
+
+  let name = $state('');
+  let driver = $state<SqlDriver>(DEFAULT_DRIVER);
+  let host = $state('localhost');
+  let port = $state(DEFAULT_PORT);
+  let database = $state('');
+  let username = $state('');
+  let password = $state('');
+  let ssl = $state(false);
+  let testing = $state(false);
+  let testStatus = $state(''); // two-step status text during a tunneled test
+
+  // SSH tunnel section state ─────────────────────────────────────────────
+  let useSshTunnel = $state(false);
+  let selectedSshProfileId = $state<string | null>(null);
+  let showNewSshModal = $state(false);
+
+  $effect(() => {
+    if (show && editConnection) {
+      name = editConnection.name;
+      driver = editConnection.driver;
+      host = editConnection.host;
+      port = editConnection.port;
+      database = editConnection.databaseName;
+      username = editConnection.username;
+      password = editConnection.password;
+      ssl = !!editConnection.ssl;
+      // SSH tunnel: round-trip the saved profile id.
+      const sid = editConnection.sshProfileId ?? null;
+      useSshTunnel = !!sid;
+      selectedSshProfileId = sid;
+    } else if (show && !editConnection) {
+      name = '';
+      driver = DEFAULT_DRIVER;
+      host = 'localhost';
+      port = DEFAULT_PORT;
+      database = '';
+      username = '';
+      password = '';
+      ssl = false;
+      useSshTunnel = false;
+      selectedSshProfileId = null;
+    }
+  });
+
+  // Load SSH profiles on dialog open if the store is empty — keeps the
+  // picker populated without forcing the user to visit SSH mode first.
+  // Guard with a one-shot flag: `loadSshProfiles` writes to the
+  // `sshProfiles` store unconditionally (even with an empty list), and
+  // this effect depends on that store, so without the guard the empty
+  // result re-triggers the effect → reload → empty result → reload …
+  // until the process is killed. The flag fires the load at most once
+  // per dialog instance; subsequent opens reuse whatever's cached.
+  let sshLoadAttempted = $state(false);
+  $effect(() => {
+    if (show && !sshLoadAttempted) {
+      sshLoadAttempted = true;
+      loadSshProfiles();
+    }
+  });
+
+  // Default selection: when toggling on with no prior selection, pick the
+  // first available profile so the picker isn't empty.
+  $effect(() => {
+    if (useSshTunnel && !selectedSshProfileId && $sshProfiles.length > 0) {
+      selectedSshProfileId = $sshProfiles[0].id;
+    }
+  });
+
+  function handleDriverChange(e: Event) {
+    const newDriver = (e.target as HTMLSelectElement).value as SqlDriver;
+    driver = newDriver;
+    port = defaultPortFor(newDriver);
+  }
+
+  async function browseForSqliteFile() {
+    const picked = await openFileDialog({
+      multiple: false,
+      directory: false,
+      title: 'Choose SQLite database file',
+      filters: [
+        { name: 'SQLite', extensions: ['db', 'sqlite', 'sqlite3', 'db3'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (typeof picked === 'string' && picked) {
+      database = picked;
+      // Default the connection name to the file's basename if the user
+      // hasn't typed one yet — saves a step for the common case.
+      if (!name.trim()) {
+        const base = picked.split(/[\\/]/).pop() ?? '';
+        if (base) name = base.replace(/\.[^.]+$/, '');
+      }
+    }
+  }
+
+  const usesHostPort = $derived(descriptorFor(driver)?.usesHostPort ?? false);
+  // D1 is special: HTTPS-only to api.cloudflare.com, identified by an
+  // account id + database id + API token (not host/port/user/pass). We
+  // store account_id in `host`, database_id in `database`, api_token in
+  // `password` — matches the Rust client's field-reuse convention.
+  const isD1 = $derived(driver === 'd1');
+  const selectedProfile = $derived(
+    selectedSshProfileId ? $sshProfiles.find((p) => p.id === selectedSshProfileId) ?? null : null
+  );
+
+  function handleNewSshCreated(profile: SshProfile) {
+    // Auto-select the freshly created profile so the user doesn't have to
+    // hunt for it in the dropdown.
+    selectedSshProfileId = profile.id;
+    useSshTunnel = true;
+  }
+
+  function buildConfig(): SqlConnectionConfig {
+    return {
+      name: name.trim(),
+      driver,
+      host,
+      port,
+      database,
+      username,
+      password,
+      ssl,
+      sshProfileId: useSshTunnel && selectedSshProfileId ? selectedSshProfileId : null,
+    };
+  }
+
+  async function handleTest() {
+    testing = true;
+    testStatus = '';
+    try {
+      // Two-step flow when tunneling: prove the bastion works first so the
+      // user sees a clear "tunnel failed" vs "DB failed" error.
+      if (useSshTunnel && selectedSshProfileId && usesHostPort) {
+        testStatus = 'Testing tunnel…';
+        try {
+          await invoke('ssh_tunnel_test', {
+            profileId: selectedSshProfileId,
+            targetHost: host,
+            targetPort: port,
+          });
+        } catch (e: any) {
+          if (!show) return; // dialog closed mid-test; discard result
+          showToast(`Tunnel test failed: ${e?.toString?.() ?? e}`, 'error');
+          return;
+        }
+        if (!show) return;
+        testStatus = 'Testing database…';
+      }
+      const result = await sqlTestConnection(buildConfig());
+      if (!show) return;
+      showToast(result || 'Connection successful', 'success');
+    } catch (err: any) {
+      if (!show) return;
+      showToast(err.toString(), 'error');
+    } finally {
+      // Always reset local state — even if the dialog was reopened later we
+      // want a fresh slate. Backend tauri call still runs to completion.
+      testing = false;
+      testStatus = '';
+    }
+  }
+
+  function handleSave() {
+    if (!name.trim()) {
+      showToast('Connection name is required', 'error');
+      return;
+    }
+    if (useSshTunnel && !selectedSshProfileId) {
+      showToast('Pick an SSH profile or turn off the tunnel', 'error');
+      return;
+    }
+    onsave?.(buildConfig());
+    show = false;
+  }
+</script>
+
+<Modal bind:show title={editConnection ? 'Edit Connection' : 'New Connection'} width="460px" {onclose}>
+  <div class="conn-form">
+    <label class="conn-field">
+      <span class="conn-label">Name</span>
+      <input class="conn-input" type="text" bind:value={name} placeholder="My Database" />
+    </label>
+
+    <label class="conn-field">
+      <span class="conn-label">Driver</span>
+      <select class="conn-select" value={driver} onchange={handleDriverChange}>
+        {#each SQL_DIALECTS as d (d.key)}
+          <option value={d.key}>{d.displayName}</option>
+        {/each}
+      </select>
+    </label>
+
+    {#if usesHostPort}
+      <div class="conn-row">
+        <label class="conn-field" style="flex:2">
+          <span class="conn-label">Host</span>
+          <input class="conn-input" type="text" bind:value={host} placeholder="localhost" />
+        </label>
+        <label class="conn-field" style="flex:1">
+          <span class="conn-label">Port</span>
+          <input class="conn-input" type="number" bind:value={port} />
+        </label>
+      </div>
+    {/if}
+
+    {#if isD1}
+      <label class="conn-field">
+        <span class="conn-label">Account ID</span>
+        <input class="conn-input" type="text" bind:value={host} placeholder="33-char Cloudflare account ID" />
+      </label>
+      <label class="conn-field">
+        <span class="conn-label">Database ID</span>
+        <input class="conn-input" type="text" bind:value={database} placeholder="UUID from your D1 dashboard" />
+      </label>
+      <label class="conn-field">
+        <span class="conn-label">API Token</span>
+        <input class="conn-input" type="password" bind:value={password} placeholder="Token with D1:Edit permission" />
+        <span class="ssh-caption">
+          Create one at dash.cloudflare.com/profile/api-tokens — needs the <code>D1:Edit</code> permission scoped to your account.
+        </span>
+      </label>
+    {:else}
+      <label class="conn-field">
+        <span class="conn-label">{usesHostPort ? 'Database' : 'File Path'}</span>
+        {#if !usesHostPort}
+          <div class="conn-file-row">
+            <input class="conn-input" type="text" bind:value={database} placeholder="/path/to/db.sqlite" />
+            <button type="button" class="conn-file-btn" onclick={browseForSqliteFile} title="Choose a SQLite file">
+              Browse…
+            </button>
+          </div>
+        {:else}
+          <input class="conn-input" type="text" bind:value={database} placeholder="mydb" />
+        {/if}
+      </label>
+    {/if}
+
+    {#if usesHostPort}
+      <div class="conn-row">
+        <label class="conn-field" style="flex:1">
+          <span class="conn-label">Username</span>
+          <input class="conn-input" type="text" bind:value={username} placeholder="user" />
+        </label>
+        <label class="conn-field" style="flex:1">
+          <span class="conn-label">Password</span>
+          <input class="conn-input" type="password" bind:value={password} placeholder="password" />
+        </label>
+      </div>
+
+      <label class="conn-check">
+        <input type="checkbox" bind:checked={ssl} />
+        <span>Use SSL</span>
+      </label>
+
+      <!-- SSH Tunnel section — hidden for SQLite (no host/port). -->
+      <section class="ssh-section" class:expanded={useSshTunnel}>
+        <header class="ssh-section-head">
+          <span class="ssh-section-title">SSH Tunnel</span>
+          <label class="ssh-toggle">
+            <input type="checkbox" bind:checked={useSshTunnel} />
+            <span>Connect via SSH tunnel</span>
+          </label>
+        </header>
+
+        {#if useSshTunnel}
+          <div class="ssh-section-body">
+            {#if $sshProfiles.length === 0}
+              <p class="ssh-empty">No SSH profiles yet.</p>
+              <button class="ssh-new-btn primary" type="button" onclick={() => (showNewSshModal = true)}>
+                + Create new SSH profile…
+              </button>
+            {:else}
+              <label class="conn-field">
+                <span class="conn-label">SSH Profile</span>
+                <select class="conn-select" bind:value={selectedSshProfileId}>
+                  {#each $sshProfiles as p (p.id)}
+                    <option value={p.id}>{p.name}</option>
+                  {/each}
+                </select>
+                {#if selectedProfile}
+                  <span class="ssh-caption">{selectedProfile.username}@{selectedProfile.host}:{selectedProfile.port}</span>
+                {/if}
+              </label>
+              <button class="ssh-new-btn" type="button" onclick={() => (showNewSshModal = true)}>
+                + Create new SSH profile…
+              </button>
+            {/if}
+          </div>
+        {/if}
+      </section>
+    {/if}
+
+    <div class="conn-actions">
+      <button class="conn-btn outline conn-test-btn" onclick={handleTest} disabled={testing}>
+        {testing ? (testStatus || 'Testing…') : 'Test Connection'}
+      </button>
+      <div style="flex:1"></div>
+      <button class="conn-btn outline" onclick={() => show = false}>Cancel</button>
+      <button class="conn-btn primary" onclick={handleSave}>Save</button>
+    </div>
+  </div>
+</Modal>
+
+<NewSshProfileModal bind:show={showNewSshModal} onCreated={handleNewSshCreated} />
+
+<style>
+  .conn-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .conn-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .conn-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--t2);
+    font-family: var(--ui);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .conn-input, .conn-select {
+    height: 32px;
+    background: var(--e);
+    border: 1px solid var(--b1);
+    border-radius: 6px;
+    padding: 0 10px;
+    font-size: 12.5px;
+    font-family: var(--mono);
+    color: var(--t1);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .conn-input:focus, .conn-select:focus {
+    border-color: var(--acc);
+  }
+  .conn-file-row {
+    display: flex;
+    gap: 6px;
+  }
+  .conn-file-row .conn-input {
+    flex: 1;
+    min-width: 0;
+  }
+  .conn-file-btn {
+    height: 32px;
+    padding: 0 12px;
+    background: var(--e);
+    border: 1px solid var(--b1);
+    border-radius: 6px;
+    color: var(--t1);
+    font-family: var(--ui);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+  .conn-file-btn:hover {
+    border-color: var(--acc);
+    background: var(--b1);
+  }
+  .conn-input::placeholder {
+    color: var(--t3);
+  }
+  .conn-select {
+    cursor: default;
+    font-family: var(--ui);
+    padding-right: 28px;
+    -webkit-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%23b0b0c8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='3 5 6 8 9 5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px 10px;
+  }
+  .conn-row {
+    display: flex;
+    gap: 10px;
+  }
+  .conn-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--t2);
+    font-family: var(--ui);
+    cursor: default;
+  }
+  .conn-check input {
+    accent-color: var(--acc);
+  }
+  /* SSH tunnel section — visually distinct group, indented body when expanded. */
+  .ssh-section {
+    border: 1px solid var(--b1);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--e) 60%, transparent);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .ssh-section.expanded {
+    border-color: var(--b2);
+  }
+  .ssh-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .ssh-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--t2);
+    font-family: var(--ui);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .ssh-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--t2);
+    font-family: var(--ui);
+    cursor: default;
+  }
+  .ssh-toggle input {
+    accent-color: var(--acc);
+  }
+  .ssh-section-body {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding-left: 4px;
+    border-left: 2px solid var(--b1);
+    padding: 4px 0 4px 10px;
+  }
+  .ssh-caption {
+    font-size: 11px;
+    color: var(--t3);
+    font-family: var(--mono);
+    margin-top: 2px;
+  }
+  .ssh-empty {
+    margin: 0;
+    font-size: 12px;
+    color: var(--t3);
+    font-family: var(--ui);
+  }
+  .ssh-new-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed var(--b1);
+    border-radius: 6px;
+    color: var(--t2);
+    font-size: 12px;
+    font-family: var(--ui);
+    padding: 6px 12px;
+    cursor: default;
+    transition: border-color 0.12s, color 0.12s;
+  }
+  .ssh-new-btn:hover {
+    border-color: var(--b2);
+    color: var(--t1);
+  }
+  .ssh-new-btn.primary {
+    border-style: solid;
+    border-color: var(--acc);
+    color: var(--acc);
+  }
+  .conn-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--b1);
+  }
+  .conn-btn {
+    height: 34px;
+    padding: 0 20px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-family: var(--ui);
+    cursor: default;
+    transition: opacity 0.12s, border-color 0.12s, color 0.12s;
+  }
+  /* Stable width on the Test button so the label can cycle through
+     "Testing tunnel…" / "Testing database…" without reflowing the row. */
+  .conn-test-btn {
+    min-width: 160px;
+    text-align: center;
+  }
+  .conn-btn.outline {
+    border: 1px solid var(--b1);
+    background: transparent;
+    color: var(--t2);
+  }
+  .conn-btn.outline:hover:not(:disabled) {
+    border-color: var(--b2);
+    color: var(--t1);
+  }
+  .conn-btn.outline:disabled {
+    opacity: 0.5;
+  }
+  .conn-btn.primary {
+    border: none;
+    background: var(--acc);
+    color: #fff;
+    font-weight: 600;
+  }
+  .conn-btn.primary:hover {
+    opacity: 0.85;
+  }
+</style>

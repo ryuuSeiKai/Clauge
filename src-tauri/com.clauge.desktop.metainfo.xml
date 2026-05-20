@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.clauge.desktop</id>
+  <name>Clauge</name>
+  <summary>An AI-powered cross-platform desktop super-app for developers</summary>
+  <description>
+    <p>
+      Clauge is an all-in-one developer desktop app. It brings your entire development
+      workflow into one place — so you can focus on building instead of switching between tools.
+    </p>
+    <p>
+      Designed to grow with you, Clauge continuously expands its capabilities to cover
+      more of what developers need, all from a single unified interface.
+    </p>
+    <p>Features include:</p>
+    <ul>
+      <li>Claude AI agent with context-aware sessions</li>
+      <li>REST API client with collections and environments</li>
+      <li>SQL and NoSQL database explorer and query runner</li>
+      <li>SSH terminal with profile management</li>
+      <li>Remote file explorer (SFTP, FTP, S3, Azure Blob)</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">Clauge.desktop</launchable>
+
+  <url type="homepage">https://clauge.in</url>
+  <url type="bugtracker">https://github.com/ansxuman/Clauge/issues</url>
+
+  <categories>
+    <category>Development</category>
+    <category>Utility</category>
+  </categories>
+
+  <keywords>
+    <keyword>developer</keyword>
+    <keyword>AI</keyword>
+    <keyword>REST</keyword>
+    <keyword>SQL</keyword>
+    <keyword>NoSQL</keyword>
+    <keyword>SSH</keyword>
+    <keyword>database</keyword>
+    <keyword>Claude</keyword>
+    <keyword>development</keyword>
+    <keyword>productivity</keyword>
+    <keyword>workflow</keyword>
+  </keywords>
+
+  <developer id="com.clauge">
+    <name>Clauge</name>
+  </developer>
+
+  <project_license>LicenseRef-proprietary</project_license>
+  <metadata_license>FSFAP</metadata_license>
+
+  <content_rating type="oars-1.1" />
+</component>

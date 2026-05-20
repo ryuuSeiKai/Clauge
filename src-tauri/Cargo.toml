@@ -1,16 +1,14 @@
 [package]
 name = "app"
-version = "2.2.0-alpha"
-description = "A Tauri App"
-authors = ["you"]
+version = "3.0.0-alpha.16"
+description = "Clauge — An AI-powered cross-platform desktop super-app for developers"
+authors = ["Anshuman <support@clauge.in>"]
+license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
+repository = "https://github.com/ansxuman/Clauge"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+rust-version = "1.77.2"
 
 [lib]
-# The `_lib` suffix may seem redundant but it is necessary
-# to make the lib name unique and wouldn't conflict with the bin name.
-# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
 name = "app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
@@ -18,25 +16,94 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
-tauri-plugin-opener = "2"
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri-plugin-dialog = "2.6.0"
-tauri-plugin-fs = "2.4.5"
+serde = { version = "1", features = ["derive"] }
+log = { version = "0.4", features = ["std"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-http = "2"
+reqwest = { version = "0.12", features = ["gzip", "brotli", "deflate", "json", "native-tls", "stream", "multipart"] }
+url = "2"
+tauri-plugin-store = "2"
+tauri-plugin-deep-link = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-os = "2"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "postgres", "mysql", "tls-rustls", "chrono", "uuid", "json", "rust_decimal"] }
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+tokio-util = { version = "0.7", features = ["io"] }
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+rust_decimal = { version = "1", features = ["serde-with-str"] }
+mime_guess = "2"
+mongodb = "3"
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 portable-pty = "0.9.0"
-uuid = { version = "1.22.0", features = ["v4"] }
-dirs = "5"
-base64 = "0.22"
-chrono = "0.4"
-window-vibrancy = "0.6"
-reqwest = { version = "0.13.2", default-features = false, features = ["blocking", "json", "native-tls"] }
-url = "2.5.8"
-tokio = { version = "1.50.0", features = ["time"] }
-image = "0.25.10"
-tauri-plugin-updater = "2.10.0"
-tauri-plugin-process = "2.3.1"
-tauri-plugin-autostart = "2.5.1"
-tauri-plugin-notification = "2.3.3"
 parking_lot = "0.12"
+base64 = "0.22"
+dirs = "5"
+flate2 = "1"
+hex = "0.4"
+tauri-plugin-notification = "2"
+# SSH client (pure-Rust, cross-platform)
+russh = "0.45"
+russh-keys = "0.45"
+async-trait = "0.1"
+async-stream = "0.3"
+sha2 = "0.10"
+# Argv-style tokenizer used for OpenSSH ProxyCommand. Splits a template
+# like `cloudflared access ssh --hostname %h` into argv WITHOUT spawning
+# a shell — keeps cross-platform behavior identical and avoids shell
+# escaping issues. See modes/ssh/ssh_session.rs spawn_proxy_command_stream.
+shell-words = "1.1"
+# Explorer mode (SFTP / FTP / S3 / Azure Blob) — shared deps.
+bytes = "1"
+futures = "0.3"
+regex = "1"
+# SFTP backend rides on the existing russh dependency.
+russh-sftp = "2"
+# S3-family backend (AWS / R2 / MinIO / Wasabi / B2 / GCS-S3compat / Custom).
+# Default features include ListObjectsV2 + XML parsing; no need for quick-xml separately.
+rusty-s3 = "0.9"
+# Azure Blob Storage backend. The legacy `azure_storage` SDK uses its own
+# HTTP stack — proxy support comes from honouring system env vars
+# (HTTPS_PROXY etc.); explicit proxy_url from our settings is best-effort.
+azure_storage = "0.21"
+azure_storage_blobs = "0.21"
+azure_core = "0.21"
+# FTP backend (plain). FTPS-explicit deferred — suppaftp's tokio
+# `into_secure` flow has typing friction we'll resolve in v2.
+suppaftp = { version = "8", features = ["tokio"] }
+axum = { version = "0.8.4", default-features = false, features = ["tokio", "http1", "json"] }
+toml_edit = "0.25.5"
+# Credential store for Windows + Linux (Win Credential Manager / libsecret).
+# macOS uses a separate shell-out path to /usr/bin/security in
+# shared/platform/credential_store.rs — keeps Keychain access prompts to a
+# minimum since /usr/bin/security is implicitly trusted by macOS.
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+keyring = { version = "3", features = ["windows-native", "sync-secret-service"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa = "0.26"
+objc = "0.2"
+window-vibrancy = "0.7"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+window-vibrancy = "0.7"
+# Match the windows-rs major Tauri 2.10 pulls in to avoid shipping two
+# copies of the crate. HWND is the same shape in both, so the cast in
+# appearance/window_chrome.rs works either way.
+windows = { version = "0.61", features = ["Win32_Graphics_Dwm", "Win32_Foundation"] }
+
+# Single-instance enforcement on Linux + Windows. macOS .app bundles
+# are single-instance natively, so this plugin is gated to other OSes.
+# Forwards deep-link URIs from the new launch attempt to the running
+# process — OAuth callbacks land in the original window instead of
+# spawning a fresh instance.
+[target.'cfg(any(target_os = "linux", target_os = "windows"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
