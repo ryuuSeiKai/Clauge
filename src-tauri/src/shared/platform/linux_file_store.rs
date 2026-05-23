@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use super::credential_store::CredentialStore;
 
@@ -36,8 +36,10 @@ pub struct LinuxFileStore {
     path: PathBuf,
     key: [u8; 32],
     // Serialise writes (read-modify-write of the whole file). Reads are cheap
-    // and don't contend often, so a single Mutex is fine.
-    lock: Mutex<()>,
+    // and don't contend often, so a single Mutex is fine. `Arc` so the same
+    // lock is shared across `spawn_blocking` closures (without it, each
+    // closure would lock its own private mutex and race on the file).
+    lock: Arc<Mutex<()>>,
 }
 
 impl LinuxFileStore {
@@ -60,74 +62,79 @@ impl LinuxFileStore {
             fallback_ikm()
         });
         let key = derive_key(ikm.as_bytes());
-        Self { path, key, lock: Mutex::new(()) }
+        Self { path, key, lock: Arc::new(Mutex::new(())) }
     }
 
-    fn load(&self) -> Result<BTreeMap<String, String>, String> {
-        let bytes = match fs::read(&self.path) {
-            Ok(b) => b,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
-            Err(e) => return Err(format!("read {}: {}", self.path.display(), e)),
-        };
-        if bytes.len() < 5 + NONCE_LEN {
-            // Corrupt / truncated — treat as empty so the user isn't bricked.
-            log::warn!("[linux_file_store] credentials file too short ({} bytes), resetting", bytes.len());
-            return Ok(BTreeMap::new());
-        }
-        if &bytes[0..4] != FILE_MAGIC {
-            log::warn!("[linux_file_store] credentials file magic mismatch, resetting");
-            return Ok(BTreeMap::new());
-        }
-        if bytes[4] != FILE_VERSION {
-            return Err(format!("unsupported credentials file version: {}", bytes[4]));
-        }
-        let nonce = Nonce::from_slice(&bytes[5..5 + NONCE_LEN]);
-        let ciphertext = &bytes[5 + NONCE_LEN..];
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key));
-        let plaintext = cipher
-            .decrypt(nonce, ciphertext)
-            .map_err(|_| "decrypt failed (machine-id changed?)".to_string())?;
-        let map: BTreeMap<String, String> = serde_json::from_slice(&plaintext)
-            .map_err(|e| format!("parse credentials: {}", e))?;
-        Ok(map)
+}
+
+// `load` and `save` are free functions (not `&self` methods) so the
+// `spawn_blocking` closures below can call them with just `path` + `key`
+// without reconstructing a `LinuxFileStore` (which would create a fresh
+// Mutex and defeat the shared lock).
+fn load(path: &PathBuf, key: &[u8; 32]) -> Result<BTreeMap<String, String>, String> {
+    let bytes = match fs::read(path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(e) => return Err(format!("read {}: {}", path.display(), e)),
+    };
+    if bytes.len() < 5 + NONCE_LEN {
+        // Corrupt / truncated — treat as empty so the user isn't bricked.
+        log::warn!("[linux_file_store] credentials file too short ({} bytes), resetting", bytes.len());
+        return Ok(BTreeMap::new());
     }
+    if &bytes[0..4] != FILE_MAGIC {
+        log::warn!("[linux_file_store] credentials file magic mismatch, resetting");
+        return Ok(BTreeMap::new());
+    }
+    if bytes[4] != FILE_VERSION {
+        return Err(format!("unsupported credentials file version: {}", bytes[4]));
+    }
+    let nonce = Nonce::from_slice(&bytes[5..5 + NONCE_LEN]);
+    let ciphertext = &bytes[5 + NONCE_LEN..];
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let plaintext = cipher
+        .decrypt(nonce, ciphertext)
+        .map_err(|_| "decrypt failed (machine-id changed?)".to_string())?;
+    let map: BTreeMap<String, String> = serde_json::from_slice(&plaintext)
+        .map_err(|e| format!("parse credentials: {}", e))?;
+    Ok(map)
+}
 
-    fn save(&self, map: &BTreeMap<String, String>) -> Result<(), String> {
-        let plaintext = serde_json::to_vec(map).map_err(|e| format!("encode: {}", e))?;
-        let mut nonce_bytes = [0u8; NONCE_LEN];
-        OsRng.fill_bytes(&mut nonce_bytes);
-        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&self.key));
-        let ciphertext = cipher
-            .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
-            .map_err(|e| format!("encrypt: {}", e))?;
+fn save(path: &PathBuf, key: &[u8; 32], map: &BTreeMap<String, String>) -> Result<(), String> {
+    let plaintext = serde_json::to_vec(map).map_err(|e| format!("encode: {}", e))?;
+    let mut nonce_bytes = [0u8; NONCE_LEN];
+    OsRng.fill_bytes(&mut nonce_bytes);
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+    let ciphertext = cipher
+        .encrypt(Nonce::from_slice(&nonce_bytes), plaintext.as_ref())
+        .map_err(|e| format!("encrypt: {}", e))?;
 
-        let mut out = Vec::with_capacity(5 + NONCE_LEN + ciphertext.len());
-        out.extend_from_slice(FILE_MAGIC);
-        out.push(FILE_VERSION);
-        out.extend_from_slice(&nonce_bytes);
-        out.extend_from_slice(&ciphertext);
+    let mut out = Vec::with_capacity(5 + NONCE_LEN + ciphertext.len());
+    out.extend_from_slice(FILE_MAGIC);
+    out.push(FILE_VERSION);
+    out.extend_from_slice(&nonce_bytes);
+    out.extend_from_slice(&ciphertext);
 
-        // Atomic write: tmp → fsync → rename. Avoids leaving a half-written
-        // file if the process dies mid-write.
-        let tmp = self.path.with_extension("bin.tmp");
+    // Atomic write: tmp → fsync → rename. Avoids leaving a half-written
+    // file if the process dies mid-write.
+    let tmp = path.with_extension("bin.tmp");
+    {
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)
+            .map_err(|e| format!("open tmp: {}", e))?;
+        #[cfg(unix)]
         {
-            let mut f = fs::OpenOptions::new()
-                .write(true)
-                .create(true)
-                .truncate(true)
-                .open(&tmp)
-                .map_err(|e| format!("open tmp: {}", e))?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = f.set_permissions(fs::Permissions::from_mode(0o600));
-            }
-            f.write_all(&out).map_err(|e| format!("write tmp: {}", e))?;
-            f.sync_all().map_err(|e| format!("fsync tmp: {}", e))?;
+            use std::os::unix::fs::PermissionsExt;
+            let _ = f.set_permissions(fs::Permissions::from_mode(0o600));
         }
-        fs::rename(&tmp, &self.path).map_err(|e| format!("rename: {}", e))?;
-        Ok(())
+        f.write_all(&out).map_err(|e| format!("write tmp: {}", e))?;
+        f.sync_all().map_err(|e| format!("fsync tmp: {}", e))?;
     }
+    fs::rename(&tmp, path).map_err(|e| format!("rename: {}", e))?;
+    Ok(())
 }
 
 #[async_trait]
@@ -137,12 +144,12 @@ impl CredentialStore for LinuxFileStore {
         let value = value.to_string();
         let path = self.path.clone();
         let aes_key = self.key;
+        let lock = Arc::clone(&self.lock);
         tokio::task::spawn_blocking(move || {
-            let store = LinuxFileStore { path, key: aes_key, lock: Mutex::new(()) };
-            let _guard = store.lock.lock().map_err(|e| format!("lock poisoned: {}", e))?;
-            let mut map = store.load()?;
+            let _guard = lock.lock().map_err(|e| format!("lock poisoned: {}", e))?;
+            let mut map = load(&path, &aes_key)?;
             map.insert(key, value);
-            store.save(&map)
+            save(&path, &aes_key, &map)
         })
         .await
         .map_err(|e| format!("join error: {}", e))?
@@ -152,9 +159,12 @@ impl CredentialStore for LinuxFileStore {
         let key = key.to_string();
         let path = self.path.clone();
         let aes_key = self.key;
+        // Reads don't need the lock — they're idempotent against any
+        // consistent on-disk snapshot. A reader can race a writer, but
+        // it'll always see either the pre- or post-rename file (the
+        // atomic rename in `save` guarantees this).
         tokio::task::spawn_blocking(move || {
-            let store = LinuxFileStore { path, key: aes_key, lock: Mutex::new(()) };
-            let map = store.load()?;
+            let map = load(&path, &aes_key)?;
             Ok(map.get(&key).cloned())
         })
         .await
@@ -165,12 +175,12 @@ impl CredentialStore for LinuxFileStore {
         let key = key.to_string();
         let path = self.path.clone();
         let aes_key = self.key;
+        let lock = Arc::clone(&self.lock);
         tokio::task::spawn_blocking(move || {
-            let store = LinuxFileStore { path, key: aes_key, lock: Mutex::new(()) };
-            let _guard = store.lock.lock().map_err(|e| format!("lock poisoned: {}", e))?;
-            let mut map = store.load()?;
+            let _guard = lock.lock().map_err(|e| format!("lock poisoned: {}", e))?;
+            let mut map = load(&path, &aes_key)?;
             if map.remove(&key).is_some() {
-                store.save(&map)?;
+                save(&path, &aes_key, &map)?;
             }
             Ok(())
         })
@@ -266,7 +276,7 @@ mod tests {
         LinuxFileStore {
             path: dir.path.join("credentials.bin"),
             key: derive_key(b"test-machine-id-0123456789abcdef"),
-            lock: Mutex::new(()),
+            lock: Arc::new(Mutex::new(())),
         }
     }
 
@@ -327,7 +337,7 @@ mod tests {
         let store = LinuxFileStore {
             path,
             key: derive_key(b"test-machine-id"),
-            lock: Mutex::new(()),
+            lock: Arc::new(Mutex::new(())),
         };
         assert_eq!(store.get("anything").await.unwrap(), None);
     }
@@ -339,13 +349,13 @@ mod tests {
         let store_a = LinuxFileStore {
             path: path.clone(),
             key: derive_key(b"machine-id-A"),
-            lock: Mutex::new(()),
+            lock: Arc::new(Mutex::new(())),
         };
         store_a.store("k", "v").await.unwrap();
         let store_b = LinuxFileStore {
             path,
             key: derive_key(b"machine-id-B"),
-            lock: Mutex::new(()),
+            lock: Arc::new(Mutex::new(())),
         };
         assert!(store_b.get("k").await.is_err());
     }

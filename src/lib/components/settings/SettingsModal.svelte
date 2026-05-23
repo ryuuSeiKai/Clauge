@@ -160,6 +160,9 @@
             activeTab = "agent";
             agentSubTab = "plugins";
         } else if (key === "workspace") activeTab = "workspace";
+        else if (key === "sql") activeTab = "sql";
+        else if (key === "nosql") activeTab = "nosql";
+        else if (key === "explorer") activeTab = "explorer";
         else if (key === "about") activeTab = "about";
     });
 
