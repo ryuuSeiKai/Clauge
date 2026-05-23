@@ -5,7 +5,7 @@
     import { cloudPlan, cloudSub, upgradeModalOpen } from "$lib/stores/cloud";
     import AccountTabContent from "$lib/components/settings/AccountTabContent.svelte";
     import { getVersion } from "@tauri-apps/api/app";
-    import { tabs as sharedTabs, activeTabId } from "$lib/shared/stores/tabs";
+    import { tabs as sharedTabs, activeTabId, updateTab } from "$lib/shared/stores/tabs";
     import {
         clearAllChatMessages,
         countAllChatMessages,
@@ -1413,7 +1413,10 @@
                         <button
                             class="stg-tab"
                             class:active={activeTab === item.key}
-                            onclick={() => (activeTab = item.key)}
+                            onclick={() => {
+                                if (settingsTab) updateTab(settingsTab.id, { key: item.key });
+                                else activeTab = item.key;
+                            }}
                         >
                             <svg
                                 viewBox="0 0 24 24"
