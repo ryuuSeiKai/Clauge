@@ -188,8 +188,15 @@
     }
   }
 
+  // Stable ascending order by name. Backend's `ssh_profiles_repo::list_all`
+  // returns by `last_used_at DESC` (so the rest of the app — Cloud sync,
+  // known-hosts join — keeps that order), but the nav list jumping around
+  // whenever a session was last touched made it hard to find profiles.
+  // localeCompare with numeric:true gives natural ordering: host1 < host2
+  // < host10, not host1 < host10 < host2.
+  const NAME_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
   const filteredProfiles = $derived(
-    searchQuery
+    (searchQuery
       ? $sshProfiles.filter(
           (p) =>
             p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -197,6 +204,7 @@
             p.username.toLowerCase().includes(searchQuery.toLowerCase())
         )
       : $sshProfiles
+    ).slice().sort((a, b) => NAME_COLLATOR.compare(a.name, b.name))
   );
 
   function handleSelect(profile: SshProfile) {
@@ -351,7 +359,9 @@
     </div>
   {:else}
     {#each filteredProfiles as profile (profile.id)}
-      {@const connected = Array.from($sshTerminalIds.keys()).some((k) => profileIdFromTabKey(k) === profile.id && $sshConnStates.get(k) === 'connected')}
+      {@const profileStates = Array.from($sshConnStates.entries()).filter(([k]) => profileIdFromTabKey(k) === profile.id).map(([, v]) => v)}
+      {@const connecting = profileStates.some((s) => s === 'connecting')}
+      {@const connected = !connecting && profileStates.some((s) => s === 'connected')}
       <div class="ncoll">
         <!-- svelte-ignore a11y_click_events_have_key_events -->
         <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -359,6 +369,7 @@
           class="ncoll-hdr"
           class:active={$activeSshProfile?.id === profile.id}
           class:connected
+          class:connecting
           onclick={() => handleSelect(profile)}
           oncontextmenu={(e) => showProfileMenu(e, profile)}
         >
@@ -369,7 +380,11 @@
               <line x1="6" y1="7" x2="6.01" y2="7"/>
               <line x1="6" y1="17" x2="6.01" y2="17"/>
             </svg>
-            {#if connected}<span class="conn-dot" aria-label="Connected" title="Connected"></span>{/if}
+            {#if connected}
+              <span class="conn-dot" aria-label="Connected" title="Connected"></span>
+            {:else if connecting}
+              <span class="conn-dot conn-dot-connecting" aria-label="Connecting" title="Connecting…"></span>
+            {/if}
           </div>
           <div class="ncoll-text">
             <div class="ncoll-row-top">
@@ -533,6 +548,10 @@
     background: color-mix(in srgb, var(--ok, #1dc880) 18%, transparent);
     color: var(--ok, #1dc880);
   }
+  .ncoll-hdr.connecting .coll-icon-accent {
+    background: color-mix(in srgb, #f5b942 18%, transparent);
+    color: #f5b942;
+  }
   .conn-dot {
     position: absolute;
     top: -2px;
@@ -544,9 +563,19 @@
     box-shadow: 0 0 0 1.5px var(--n);
     animation: connDotPulse 3s ease-in-out infinite;
   }
+  .conn-dot.conn-dot-connecting {
+    background: #f5b942;
+    /* Faster pulse to convey in-progress activity, vs. the slower
+       "I'm just here" rhythm of the green connected dot. */
+    animation: connDotPulseConnecting 1.2s ease-in-out infinite;
+  }
   @keyframes connDotPulse {
     0%, 100% { box-shadow: 0 0 0 1.5px var(--n), 0 0 0 2px color-mix(in srgb, var(--ok, #1dc880) 30%, transparent); }
     50%      { box-shadow: 0 0 0 1.5px var(--n), 0 0 0 5px color-mix(in srgb, var(--ok, #1dc880) 0%, transparent); }
+  }
+  @keyframes connDotPulseConnecting {
+    0%, 100% { box-shadow: 0 0 0 1.5px var(--n), 0 0 0 2px color-mix(in srgb, #f5b942 45%, transparent); }
+    50%      { box-shadow: 0 0 0 1.5px var(--n), 0 0 0 6px color-mix(in srgb, #f5b942 0%, transparent); }
   }
 
   .coll-menu {

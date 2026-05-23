@@ -105,12 +105,40 @@
                     "success",
                 );
             }
+            // Only offer the destructive "Restore?" prompt when local
+            // has nothing to lose. If the user already has local data,
+            // pulling cloud would wholesale-replace it (sync::pull_all
+            // is per-domain table replacement). Push the local state up
+            // instead — matches the boot-path behaviour in +layout.svelte.
             try {
+                const { collections } = await import("$lib/modes/rest/stores");
+                const { connections: sqlConns } = await import("$lib/modes/sql/stores");
+                const { nosqlConnections } = await import("$lib/modes/nosql/stores");
+                const localEmpty =
+                    get(collections).length === 0 &&
+                    get(sqlConns).length === 0 &&
+                    get(nosqlConnections).length === 0;
+
                 const remoteHas = await cloudCheckRemoteExists();
-                if (remoteHas) showSyncRestorePrompt.set(true);
-                else markSynced();
-            } catch {
-                markSynced();
+                if (localEmpty && remoteHas) {
+                    showSyncRestorePrompt.set(true);
+                } else if (localEmpty) {
+                    markSynced();
+                } else {
+                    // Local has data — assume the user wants to keep it.
+                    // Mark synced and push so the cloud picks up this
+                    // device's state. The conflict resolver will fire
+                    // on the next divergence if both sides drift later.
+                    markSynced();
+                    cloudSyncPushNow().catch((e) =>
+                        console.warn("[Cloud] initial push after link failed:", e),
+                    );
+                }
+            } catch (e) {
+                // Network blip — leave hasSyncedOnce unset so the next
+                // boot retries. Don't permanently dismiss the prompt
+                // because of a transient failure.
+                console.warn("[Cloud] remote check after link failed:", e);
             }
         } catch (err) {
             showToast(friendlyError(err), "error");
@@ -1198,7 +1226,7 @@
 <ConfirmDialog
     bind:show={confirmPull}
     title="Pull from cloud?"
-    message="This overwrites local collections, connections, queries, agents, SSH profiles, and explorer paths with the latest from cloud. Local-only items that haven't been pushed yet will be lost."
+    message="This overwrites local collections, connections, queries, agents, SSH profiles, explorer paths, and workspace coworkers with the latest from cloud. Local-only items that haven't been pushed yet will be lost."
     confirmText="Pull from cloud"
     confirmColor="var(--acc)"
     onconfirm={() => {

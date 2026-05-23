@@ -39,6 +39,8 @@ tokio-stream = "0.1"
 tokio-util = { version = "0.7", features = ["io"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
+sys-locale = "0.3"
+os_info = { version = "3", default-features = false }
 rust_decimal = { version = "1", features = ["serde-with-str"] }
 mime_guess = "2"
 mongodb = "3"

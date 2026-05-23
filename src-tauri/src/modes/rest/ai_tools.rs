@@ -516,6 +516,49 @@ fn generate_curl<'a>(ctx: &'a ToolContext<'a>) -> ToolFuture<'a> {
                 for h in &headers {
                     curl.push_str(&format!(" \\\n  -H '{}: {}'", h.key, h.value));
                 }
+                // Emit auth so the generated cURL is usable as-is.
+                // Mirrors the export-as-cURL logic — parses auth_data
+                // JSON instead of dumping it raw after `Bearer `.
+                if !req.auth_data.is_empty() {
+                    if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&req.auth_data) {
+                        match req.auth_type.as_str() {
+                            "bearer" => {
+                                let token = auth["token"].as_str().unwrap_or("");
+                                if !token.is_empty() {
+                                    curl.push_str(&format!(
+                                        " \\\n  -H 'Authorization: Bearer {}'",
+                                        token
+                                    ));
+                                }
+                            }
+                            "basic" => {
+                                let user = auth["username"].as_str().unwrap_or("");
+                                let pass = auth["password"].as_str().unwrap_or("");
+                                curl.push_str(&format!(" \\\n  -u '{}:{}'", user, pass));
+                            }
+                            "api-key" => {
+                                let key = auth["key"].as_str().unwrap_or("");
+                                let value = auth["value"].as_str().unwrap_or("");
+                                let add_to = auth["add_to"].as_str().unwrap_or("header");
+                                if !key.is_empty() {
+                                    if add_to == "query" {
+                                        let sep = if curl.contains('?') { '&' } else { '?' };
+                                        if let Some(start) = curl.find('\'') {
+                                            if let Some(end) = curl[start + 1..].find('\'') {
+                                                let url_end = start + 1 + end;
+                                                let inject = format!("{}{}={}", sep, key, value);
+                                                curl.insert_str(url_end, &inject);
+                                            }
+                                        }
+                                    } else {
+                                        curl.push_str(&format!(" \\\n  -H '{}: {}'", key, value));
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
                 if !req.body.is_empty()
                     && matches!(req.method.as_str(), "POST" | "PUT" | "PATCH")
                 {

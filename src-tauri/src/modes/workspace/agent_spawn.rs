@@ -45,6 +45,7 @@ pub async fn drawer_chat_turn(
     body: &str,
     actor: &str,
 ) -> Result<super::commands::DrawerChatResult, String> {
+    crate::telemetry::bump("workspace.coworker_use");
     // 0. Resolve coworker (errors if deleted between picker open + send).
     let coworker = coworker_repo::get_coworker(pool, coworker_id)
         .await

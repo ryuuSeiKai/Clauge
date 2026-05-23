@@ -120,7 +120,7 @@ checksum = "7f202df86484c868dbad7eaa557ef785d5c66295e41b460ef922eca0723b842c"
 
 [[package]]
 name = "app"
-version = "3.0.0-alpha.17"
+version = "3.0.0-alpha.18"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -142,6 +142,7 @@ dependencies = [
  "mime_guess",
  "mongodb",
  "objc",
+ "os_info",
  "parking_lot",
  "portable-pty",
  "redis",
@@ -158,6 +159,7 @@ dependencies = [
  "shell-words",
  "sqlx",
  "suppaftp",
+ "sys-locale",
  "tauri",
  "tauri-build",
  "tauri-plugin-clipboard-manager",

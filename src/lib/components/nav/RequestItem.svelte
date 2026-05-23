@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Request } from '$lib/types';
   import { METHOD_COLORS } from '$lib/utils/theme';
-  import { activeRequestId, activeCollectionId, loadRequest, deleteRequest } from '$lib/modes/rest/stores';
+  import { activeRequestId, activeCollectionId, loadRequest, deleteRequest, activeEnvId, requestEnvOverrides, getEffectiveEnvId } from '$lib/modes/rest/stores';
   import { tabs, activeTabId, addTab, activateTab, updateTab } from '$lib/shared/stores/tabs';
   import { showContextMenu } from '$lib/shared/primitives/contextmenu';
   import { showToast } from '$lib/shared/primitives/toast';
@@ -67,7 +67,11 @@
         icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>',
         action: async () => {
           try {
-            const curl = await cmd.exportAsCurl(request.id);
+            // Resolve env vars in the exported cURL. The per-request
+            // override wins over the global active env (matching how
+            // the Send button picks an env for execution).
+            const envId = getEffectiveEnvId(request.id, get(requestEnvOverrides), get(activeEnvId)) || undefined;
+            const curl = await cmd.exportAsCurl(request.id, envId);
             await writeText(curl);
             showToast('Copied cURL to clipboard', 'success');
           } catch (err) {

@@ -76,8 +76,11 @@
                     const remoteHas = await cloudCheckRemoteExists();
                     if (remoteHas) showSyncRestorePrompt.set(true);
                     else markSynced();
-                } catch {
-                    markSynced();
+                } catch (e) {
+                    // Leave hasSyncedOnce unset so the next boot retries —
+                    // marking on a transient failure permanently dismissed
+                    // the prompt and was a real footgun.
+                    console.warn("[Cloud] remote check failed:", e);
                 }
             } else {
                 markSynced();

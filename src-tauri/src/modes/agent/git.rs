@@ -36,6 +36,7 @@ pub fn agent_git_ahead_behind(project_path: String) -> Result<(u32, u32), String
 
 #[tauri::command]
 pub fn agent_git_commit(project_path: String, message: String) -> Result<String, String> {
+    crate::telemetry::bump("agent.git_commit");
     let add = std::process::Command::new("git").args(["-C", &project_path, "add", "-A"]).output().map_err(|e| format!("git add failed: {}", e))?;
     if !add.status.success() { return Err(format!("git add failed: {}", String::from_utf8_lossy(&add.stderr))); }
     let commit = std::process::Command::new("git").args(["-C", &project_path, "commit", "-m", &message]).output().map_err(|e| format!("git commit failed: {}", e))?;

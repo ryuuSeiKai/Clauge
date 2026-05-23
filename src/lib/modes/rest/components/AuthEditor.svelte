@@ -1,12 +1,16 @@
 <script lang="ts">
   import EnvInput from '$lib/shared/primitives/EnvInput.svelte';
 
+  // Field names match the JSON shape the backend reads in
+  // http_executor.rs (`auth["key"]`, `auth["value"]`, `auth["add_to"]`).
+  // Earlier `key_name` / `key_value` silently broke api-key auth because
+  // the backend lookups all returned empty strings.
   type AuthData = {
     token?: string;
     username?: string;
     password?: string;
-    key_name?: string;
-    key_value?: string;
+    key?: string;
+    value?: string;
     add_to?: 'header' | 'query';
   };
 
@@ -43,8 +47,8 @@
       data = { token: '' };
     } else if (localType === 'basic') {
       data = { username: '', password: '' };
-    } else if (localType === 'apikey') {
-      data = { key_name: '', key_value: '', add_to: 'header' };
+    } else if (localType === 'api-key') {
+      data = { key: '', value: '', add_to: 'header' };
     } else {
       data = {};
     }
@@ -62,7 +66,7 @@
     <option value="none">No Auth</option>
     <option value="bearer">Bearer Token</option>
     <option value="basic">Basic Auth</option>
-    <option value="apikey">API Key</option>
+    <option value="api-key">API Key</option>
   </select>
 
   {#if localType === 'none'}
@@ -88,18 +92,18 @@
       type="password"
       onchange={(v) => updateField('password', v)}
     />
-  {:else if localType === 'apikey'}
+  {:else if localType === 'api-key'}
     <label>Key name</label>
     <EnvInput
-      value={data.key_name ?? ''}
+      value={data.key ?? ''}
       placeholder="X-API-Key"
-      onchange={(v) => updateField('key_name', v)}
+      onchange={(v) => updateField('key', v)}
     />
     <label>Key value</label>
     <EnvInput
-      value={data.key_value ?? ''}
+      value={data.value ?? ''}
       placeholder="Enter value or &#123;&#123;variable&#125;&#125;"
-      onchange={(v) => updateField('key_value', v)}
+      onchange={(v) => updateField('value', v)}
     />
     <label>Add to</label>
     <select

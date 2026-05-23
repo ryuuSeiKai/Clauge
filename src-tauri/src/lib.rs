@@ -4,6 +4,7 @@ mod commands;
 mod db;
 mod modes;
 mod shared;
+mod telemetry;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -167,6 +168,12 @@ pub fn run() {
 
             cloud::scheduler::spawn(app.handle().clone());
 
+            // Telemetry scheduler — sleeps 30s after boot, then flushes
+            // once per 24h. Fire-and-forget; failures back off to 1h.
+            // Counters live in static AtomicU64s, so the hot path
+            // (`telemetry::bump`) has no dependency on this spawn.
+            telemetry::spawn_scheduler(app.handle().clone());
+
             // Register every mode's AI tools into the shared dispatch registry.
             // Adding a new tool to a mode = one new function + one entry in
             // that mode's `register_tools()`; zero edits to the dispatch loop.
@@ -326,6 +333,7 @@ pub fn run() {
             commands::logs::app_log,
             commands::logs::set_log_level,
             commands::logs::get_app_config_path,
+            telemetry::telemetry_bump,
             appearance::vibrancy::set_vibrancy,
             appearance::vibrancy::get_appearance,
             appearance::vibrancy::set_appearance,

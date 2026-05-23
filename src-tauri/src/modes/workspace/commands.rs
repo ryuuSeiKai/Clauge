@@ -576,6 +576,7 @@ pub async fn workspace_card_create(
     coworker_id: Option<String>,
     actor: String,
 ) -> Result<WorkspaceBoardCard, String> {
+    crate::telemetry::bump("workspace.card_create");
     let id = new_id();
     let now = now_rfc3339();
     let tags_json = serde_json::to_string(&tags.unwrap_or_default()).unwrap_or_else(|_| "[]".to_string());
@@ -2087,6 +2088,7 @@ pub async fn workspace_coworker_create(
     )
     .await
     .map_err(|e| e.to_string())?;
+    crate::cloud::scheduler::bump("coworkers");
     coworker_repo::get_coworker(pool.inner(), &id)
         .await
         .map_err(|e| e.to_string())
@@ -2132,6 +2134,7 @@ pub async fn workspace_coworker_update(
     )
     .await
     .map_err(|e| e.to_string())?;
+    crate::cloud::scheduler::bump("coworkers");
     coworker_repo::get_coworker(pool.inner(), &input.id)
         .await
         .map_err(|e| e.to_string())
@@ -2170,7 +2173,9 @@ pub async fn workspace_coworker_delete(
     }
     coworker_repo::delete_coworker(pool.inner(), &id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    crate::cloud::scheduler::bump("coworkers");
+    Ok(())
 }
 
 /// Write an exported note to the path the user picked in the save

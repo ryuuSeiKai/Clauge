@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod coworkers;
 pub mod explorer;
 pub mod nosql;
 pub mod rest;
@@ -13,6 +14,7 @@ pub const ALL_KINDS: &[&str] = &[
     agent::KIND,
     ssh::KIND,
     explorer::KIND,
+    coworkers::KIND,
 ];
 
 /// Build the (hash, base64-gzip-json) tuple for a kind.
@@ -27,6 +29,7 @@ pub async fn export_kind(
         agent::KIND => agent::export(pool).await,
         ssh::KIND => ssh::export(pool).await,
         explorer::KIND => explorer::export(pool).await,
+        coworkers::KIND => coworkers::export(pool).await,
         _ => Err(format!("unknown kind: {}", kind)),
     }
 }
@@ -50,6 +53,7 @@ pub async fn import_kind(
         agent::KIND => agent::import(pool, &payload).await,
         ssh::KIND => ssh::import(pool, &payload).await,
         explorer::KIND => explorer::import(pool, &payload).await,
+        coworkers::KIND => coworkers::import(pool, &payload).await,
         _ => Err(format!("unknown kind: {}", kind)),
     }
 }

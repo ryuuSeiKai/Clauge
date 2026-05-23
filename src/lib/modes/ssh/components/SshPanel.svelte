@@ -369,6 +369,19 @@
       }
       if (!firstDataSeen && payload.data) {
         firstDataSeen = true;
+        // 'connected' is gated on first actual byte from the server, NOT on
+        // ssh_spawn_terminal resolving. The Rust command returns the
+        // terminal_id instantly after pre-minting a UUID and spawning the
+        // run_ssh_session task in the background — by the time the await
+        // resolves, the SSH handshake hasn't even started. Writing 'connected'
+        // at that point paints a green dot for ~1.7s while auth is still in
+        // flight; on auth failure the dot then snaps to disconnected. Tying
+        // it to firstDataSeen instead means the nav dot only goes green when
+        // we have evidence the server actually accepted us.
+        sshConnStates.update((m) => {
+          m.set(entry.tabKey, 'connected');
+          return new Map(m);
+        });
         deferUntilFrame(() => {
           if (spawning) {
             spawning = false;
@@ -412,10 +425,12 @@
         m.set(entry.tabKey, terminalId);
         return new Map(m);
       });
-      sshConnStates.update((m) => {
-        m.set(entry.tabKey, 'connected');
-        return new Map(m);
-      });
+      // sshConnStates is NOT set to 'connected' here. ssh_spawn_terminal
+      // resolves before the SSH handshake even begins (it just pre-mints a
+      // UUID and spawns a background task). 'connected' is now set inside
+      // the channel.onmessage firstDataSeen branch above, when the server
+      // actually sends bytes — the only reliable signal that auth + PTY
+      // succeeded. Until then state stays 'connecting' (yellow pulse).
       // Rust just bumped last_used_at as part of spawn — refresh the store so
       // the SshNav list reflects the new "Xs ago" instead of "never".
       loadSshProfiles().catch(() => {});

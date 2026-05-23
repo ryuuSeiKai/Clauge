@@ -431,6 +431,9 @@ async fn check_ok<T: DeserializeOwned>(
 ) -> Result<T, CloudError> {
     let status = resp.status().as_u16();
     if !resp.status().is_success() {
+        if status >= 500 {
+            crate::telemetry::bump("err.api_5xx");
+        }
         let body = resp.text().await.unwrap_or_default();
         return Err(CloudError::Server { status, body });
     }

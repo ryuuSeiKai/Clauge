@@ -397,25 +397,6 @@
                                 stroke-linejoin="round"
                                 aria-hidden="true"
                             >
-                                <rect x="9" y="2" width="6" height="12" rx="3" />
-                                <path d="M5 11a7 7 0 0014 0" />
-                                <path d="M12 18v3" />
-                            </svg>
-                            <span>AI meeting notes <span class="upm-feat-mute">— coming soon</span></span>
-                        </div>
-                        <div class="upm-feat">
-                            <svg
-                                class="upm-feat-icon"
-                                viewBox="0 0 24 24"
-                                width="14"
-                                height="14"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.8"
-                                stroke-linecap="round"
-                                stroke-linejoin="round"
-                                aria-hidden="true"
-                            >
                                 <rect x="3" y="8" width="18" height="13" rx="1.5" />
                                 <path d="M3 13h18" />
                                 <path d="M12 8v13" />
@@ -733,10 +714,6 @@
         color: var(--acc, #c2185b);
         flex-shrink: 0;
     }
-    .upm-feat-mute {
-        color: var(--t3, #888);
-    }
-
     /* ── Plan rows ──────────────────────────────────────────────── */
     .upm-plans {
         display: flex;

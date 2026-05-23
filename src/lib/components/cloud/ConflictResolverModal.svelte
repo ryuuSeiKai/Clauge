@@ -48,6 +48,7 @@
       case 'agent':    return 'Agent contexts';
       case 'ssh':      return 'SSH profiles';
       case 'explorer': return 'Explorer connections';
+      case 'coworkers': return 'Workspace coworkers';
       default:         return kind;
     }
   }

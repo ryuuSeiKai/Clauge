@@ -229,6 +229,14 @@
     let proxyUsername = $derived($settings["proxy_username"] ?? "");
     let proxyPassword = $derived($settings["proxy_password"] ?? "");
 
+    // --- Privacy / telemetry ---
+    // Telemetry is opt-IN by default (false === sending). The toggle
+    // below flips `telemetry_optout`; UI label is positive ("Share
+    // anonymous usage data") so the checkbox feels intuitive.
+    let telemetryOptedOut = $derived(
+        ($settings["telemetry_optout"] ?? "false") === "true",
+    );
+
     // --- Logs ---
     let logDir = $state("");
 
@@ -1732,6 +1740,57 @@
                                         </svg>
                                         <span>Clear History</span>
                                     </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Privacy / telemetry card -->
+                        <section class="stg-card">
+                            <header class="stg-card-hd">
+                                <span class="stg-card-icon" aria-hidden="true">
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        width="14"
+                                        height="14"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path
+                                            d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+                                        />
+                                    </svg>
+                                </span>
+                                <div class="stg-card-titles">
+                                    <h3 class="stg-card-title">Privacy</h3>
+                                    <p class="stg-card-sub">
+                                        Help improve Clauge with anonymous
+                                        usage data.
+                                    </p>
+                                </div>
+                            </header>
+                            <div class="stg-card-body">
+                                <div class="stg-card-row">
+                                    <label class="stg-card-row-label"
+                                        >Share anonymous usage data</label
+                                    >
+                                    <label class="stg-toggle">
+                                        <input
+                                            type="checkbox"
+                                            checked={!telemetryOptedOut}
+                                            onchange={(e) =>
+                                                handleSettingChange(
+                                                    "telemetry_optout",
+                                                    String(
+                                                        !e.currentTarget
+                                                            .checked,
+                                                    ),
+                                                )}
+                                        />
+                                        <span class="stg-toggle-slider"></span>
+                                    </label>
                                 </div>
                             </div>
                         </section>

@@ -626,6 +626,7 @@ pub async fn nosql_find_documents(
     limit: Option<i64>,
     skip: Option<u64>,
 ) -> Result<NoSqlQueryResult, String> {
+    crate::telemetry::bump("nosql.execute");
     let client = get_mongo!(connections, &connection_id);
     let coll = client.database(&database).collection::<Document>(&collection);
 
@@ -677,6 +678,7 @@ pub async fn nosql_insert_document(
     collection: String,
     document: String,
 ) -> Result<String, String> {
+    crate::telemetry::bump("nosql.execute");
     let client = get_mongo!(connections, &connection_id);
     let coll = client.database(&database).collection::<Document>(&collection);
     let doc = parse_bson_doc(&document)?;
@@ -696,6 +698,7 @@ pub async fn nosql_update_document(
     filter: String,
     update: String,
 ) -> Result<u64, String> {
+    crate::telemetry::bump("nosql.execute");
     let client = get_mongo!(connections, &connection_id);
     let coll = client.database(&database).collection::<Document>(&collection);
     let filter_doc = parse_bson_doc(&filter)?;
@@ -715,6 +718,7 @@ pub async fn nosql_delete_document(
     collection: String,
     filter: String,
 ) -> Result<u64, String> {
+    crate::telemetry::bump("nosql.execute");
     let client = get_mongo!(connections, &connection_id);
     let coll = client.database(&database).collection::<Document>(&collection);
     let filter_doc = parse_bson_doc(&filter)?;
@@ -752,6 +756,7 @@ pub async fn nosql_aggregate(
     collection: String,
     pipeline: String,
 ) -> Result<NoSqlQueryResult, String> {
+    crate::telemetry::bump("nosql.execute");
     let client = get_mongo!(connections, &connection_id);
     let coll = client.database(&database).collection::<Document>(&collection);
 

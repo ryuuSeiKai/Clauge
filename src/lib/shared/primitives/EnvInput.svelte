@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { activeEnvId, getEffectiveEnvId } from '$lib/modes/rest/stores';
+  import { activeEnvId, getEffectiveEnvId, environments, createEnvironment, setActiveEnv, setEnvVariable } from '$lib/modes/rest/stores';
   import { activeRequest, requestEnvOverrides } from '$lib/modes/rest/stores';
   import { activeTabId } from '$lib/shared/stores/tabs';
   import { getEnvVariablesForResolution } from '$lib/modes/rest/commands';
+  import { get } from 'svelte/store';
+  import { showToast } from '$lib/shared/primitives/toast';
 
   let { value = '', placeholder = '', type = 'text', onchange }: {
     value: string;
@@ -19,6 +21,88 @@
   let suppressRender = false;
   let justSelected = false;
   let dropdownStyle = $state('');
+
+  // Manual undo/redo. EnvInput is a contenteditable that rewrites innerHTML
+  // on every keystroke (variable chip rendering), which destroys the
+  // browser's native undo stack — same root cause that broke Cmd+Z on the
+  // URL bar. We keep our own ring of {value, cursor} snapshots, coalesce
+  // bursts of typing into one entry, and intercept the keyboard shortcuts.
+  // Fixes undo across every consumer (KVTable header/param values,
+  // AuthEditor token / username / password / api-key value).
+  const UNDO_MAX = 100;
+  const UNDO_COALESCE_MS = 300;
+  type Snap = { value: string; cursor: number };
+  let undoStack: Snap[] = [];
+  let redoStack: Snap[] = [];
+  let lastSnapAt = 0;
+  let lastSnapValue = '';
+  // Reset the stack when the consumer field changes identity (different tab
+  // / request / auth slot). Tracked outside the effect so that prop-driven
+  // updates from our OWN onchange don't trigger a reset on every keystroke.
+  let lastSeenTabId = -999;
+  let lastSeenReqId = '__init__';
+  $effect(() => {
+    const tabId = $activeTabId;
+    const reqId = $activeRequest?.id ?? '';
+    if (tabId === lastSeenTabId && reqId === lastSeenReqId) return;
+    lastSeenTabId = tabId;
+    lastSeenReqId = reqId;
+    undoStack = [{ value, cursor: value.length }];
+    redoStack = [];
+    lastSnapAt = 0;
+    lastSnapValue = value;
+  });
+
+  function pushSnapshot(val: string, cursor: number) {
+    if (val === lastSnapValue) return;
+    const now = Date.now();
+    const coalesce = now - lastSnapAt < UNDO_COALESCE_MS && undoStack.length > 0;
+    if (coalesce) {
+      undoStack[undoStack.length - 1] = { value: val, cursor };
+    } else {
+      undoStack.push({ value: val, cursor });
+      if (undoStack.length > UNDO_MAX) undoStack.shift();
+    }
+    redoStack.length = 0;
+    lastSnapAt = now;
+    lastSnapValue = val;
+  }
+
+  function applySnapshot(snap: Snap) {
+    suppressRender = true;
+    onchange(snap.value);
+    renderToEditor(snap.value);
+    restoreCursor(snap.cursor);
+    lastSnapValue = snap.value;
+    lastSnapAt = 0; // next edit starts a new coalesce window
+    requestAnimationFrame(() => { suppressRender = false; });
+  }
+
+  function doUndo() {
+    if (undoStack.length <= 1) return;
+    const current = undoStack.pop()!;
+    redoStack.push(current);
+    applySnapshot(undoStack[undoStack.length - 1]);
+  }
+
+  function doRedo() {
+    if (redoStack.length === 0) return;
+    const next = redoStack.pop()!;
+    undoStack.push(next);
+    applySnapshot(next);
+  }
+
+  // WKWebView (Tauri's renderer on macOS) sometimes routes Cmd+Z through
+  // beforeinput with inputType `historyUndo` before keydown can intercept.
+  function handleBeforeInput(e: InputEvent) {
+    if (e.inputType === 'historyUndo') {
+      e.preventDefault();
+      doUndo();
+    } else if (e.inputType === 'historyRedo') {
+      e.preventDefault();
+      doRedo();
+    }
+  }
 
   const overrideKey = $derived($activeRequest?.id ?? String($activeTabId));
   const effectiveEnvId = $derived(
@@ -48,6 +132,50 @@
       ? envVarEntries.filter(v => v.key.toLowerCase().includes(acFilter.toLowerCase())).slice(0, 8)
       : envVarEntries.slice(0, 8)
   );
+
+  // Inline create: when the user types {{name and no var with that EXACT
+  // key exists yet, offer a "+ Create" row at the bottom of the dropdown.
+  // Validates a basic identifier shape so we don't try to create a var
+  // named with weird characters that won't round-trip through resolution.
+  const VAR_NAME_RE = /^[A-Za-z_][A-Za-z0-9_-]*$/;
+  const exactMatch = $derived(envVarEntries.some(v => v.key === acFilter));
+  const canCreate = $derived(acFilter.length > 0 && !exactMatch && VAR_NAME_RE.test(acFilter));
+
+  async function createInline(name: string) {
+    if (!VAR_NAME_RE.test(name)) {
+      showToast('Variable names use letters, digits, _ and -', 'error');
+      return;
+    }
+    try {
+      // Resolve which env to write to. Falls back to creating a "Default"
+      // env when the user hasn't set one up yet — without this, typing
+      // {{foo}} in any field with no env configured is a dead-end.
+      let envId = get(activeEnvId);
+      if (!envId) {
+        const envs = get(environments);
+        if (envs.length > 0) {
+          envId = envs[0].id;
+          await setActiveEnv(envId);
+        } else {
+          const created = await createEnvironment('Default', 'var(--acc)');
+          envId = created.id;
+          await setActiveEnv(envId);
+        }
+      }
+      await setEnvVariable(envId, name, '', 0);
+
+      // Refresh local list so the chip renders with the new var present
+      // and future {{ autocomplete sees it.
+      const vars = await getEnvVariablesForResolution(envId);
+      envVarEntries = Object.entries(vars).map(([key, value]) => ({ key, value }));
+
+      // Finally drop the chip into the field.
+      selectItem(name);
+      showToast(`Added {{${name}}} to environment`, 'success');
+    } catch (e) {
+      showToast(`Failed to create variable: ${e}`, 'error');
+    }
+  }
 
   function esc(s: string): string {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -194,6 +322,7 @@
     suppressRender = true;
     const cursorPos = getCursorOffset();
     const val = extractValue();
+    pushSnapshot(val, cursorPos);
     onchange(val);
 
     const textBefore = val.slice(0, cursorPos);
@@ -220,16 +349,36 @@
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    if (!acOpen || acItems.length === 0) return;
+    // Manual undo/redo — intercept before the browser fights us.
+    const isMod = e.metaKey || e.ctrlKey;
+    if (isMod && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) doRedo();
+      else doUndo();
+      return;
+    }
+    if (isMod && (e.key === 'y' || e.key === 'Y')) {
+      e.preventDefault();
+      doRedo();
+      return;
+    }
+
+    if (!acOpen) return;
+    if (acItems.length === 0 && !canCreate) return;
+
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      acIdx = Math.min(acIdx + 1, acItems.length - 1);
+      acIdx = Math.min(acIdx + 1, Math.max(0, acItems.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       acIdx = Math.max(acIdx - 1, 0);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      selectItem(acItems[acIdx].key);
+      if (acItems.length > 0) {
+        selectItem(acItems[acIdx].key);
+      } else if (canCreate) {
+        createInline(acFilter);
+      }
     } else if (e.key === 'Escape') {
       acOpen = false;
     }
@@ -276,6 +425,9 @@
     const chipEndIdx = newValue.lastIndexOf(chipPattern);
     const cursorTarget = chipEndIdx >= 0 ? chipEndIdx + chipPattern.length : newValue.length;
 
+    // Distinct undo entry for the chip insertion so Cmd+Z reverts it.
+    lastSnapAt = 0;
+    pushSnapshot(newValue, cursorTarget);
     onchange(newValue);
     renderToEditor(newValue);
     restoreCursor(cursorTarget);
@@ -312,12 +464,13 @@
     tabindex="0"
     data-placeholder={placeholder}
     oninput={handleInput}
+    onbeforeinput={handleBeforeInput}
     onkeydown={handleKeydown}
     onblur={handleBlur}
     onpaste={handlePaste}
     spellcheck="false"
   ></div>
-  {#if acOpen && acItems.length > 0}
+  {#if acOpen && (acItems.length > 0 || canCreate)}
     <div class="env-ac-dropdown" style={dropdownStyle}>
       {#each acItems as item, i (item.key)}
         <button
@@ -330,6 +483,18 @@
           <span class="env-ac-val">{item.value}</span>
         </button>
       {/each}
+      {#if canCreate}
+        <button
+          class="env-ac-item env-ac-create"
+          onmousedown={(e) => { e.preventDefault(); createInline(acFilter); }}
+        >
+          <span class="env-ac-create-icon">+</span>
+          <span class="env-ac-name">Create {`{{${acFilter}}}`}</span>
+          <span class="env-ac-val">
+            {#if !$activeEnvId}new env "Default"{:else}in current env{/if}
+          </span>
+        </button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -409,5 +574,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 150px;
+  }
+  .env-ac-create {
+    border-top: 1px solid var(--b1);
+  }
+  .env-ac-create-icon {
+    display: inline-flex;
+    width: 14px;
+    height: 14px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 3px;
+    background: var(--acc);
+    color: #fff;
+    font-weight: 700;
+    font-size: 12px;
+    line-height: 1;
   }
 </style>
