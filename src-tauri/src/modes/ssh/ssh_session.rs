@@ -248,7 +248,20 @@ async fn perform_ssh_handshake_and_auth(
     // SSH handshake with a hard 15s timeout. ProxyCommand subprocesses can
     // hang if the underlying tunnel never opens — we don't want SSH connect
     // attempts to wait forever in that case.
-    let config = Arc::new(client::Config::default());
+    //
+    // Server keepalive: russh's default Config has none, so a host that
+    // dies silently (network partition, instance terminated, laptop sleep
+    // on the other side) leaves the channel in a half-open state forever
+    // and the frontend dot stays green indefinitely. With these settings
+    // the client sends a keepalive every 30s and tears the channel down
+    // after 3 missed replies — dead hosts surface within ~90s as an
+    // ordinary exit, which markExited() on the frontend converts to a
+    // 'disconnected' state (no more stale green pulse).
+    let config = Arc::new(client::Config {
+        keepalive_interval: Some(std::time::Duration::from_secs(30)),
+        keepalive_max: 3,
+        ..client::Config::default()
+    });
     let connect_fut = client::connect_stream(config, transport, ClientHandler);
     let mut handle: Handle<ClientHandler> = match tokio::time::timeout(
         std::time::Duration::from_secs(15),
@@ -258,7 +271,10 @@ async fn perform_ssh_handshake_and_auth(
     {
         Ok(Ok(h)) => h,
         Ok(Err(e)) => return Err(format!("ssh connect: {}", e)),
-        Err(_) => return Err("ssh connect: timed out after 15s".to_string()),
+        Err(_) => {
+            crate::telemetry::bump("err.ssh_timeout");
+            return Err("ssh connect: timed out after 15s".to_string());
+        }
     };
 
     // Auth phase has its own timeout — separate from the handshake timeout
@@ -275,12 +291,16 @@ async fn perform_ssh_handshake_and_auth(
     {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => return Err(e),
-        Err(_) => return Err("ssh auth: timed out after 30s".to_string()),
+        Err(_) => {
+            crate::telemetry::bump("err.ssh_timeout");
+            return Err("ssh auth: timed out after 30s".to_string());
+        }
     };
     if !authed {
         return Err("authentication failed".to_string());
     }
 
+    crate::telemetry::bump("ssh.connect");
     Ok(handle)
 }
 

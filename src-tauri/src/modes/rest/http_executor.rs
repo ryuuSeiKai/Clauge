@@ -181,6 +181,7 @@ pub async fn execute_request(
     request_id: String,
     environment_id: String,
 ) -> Result<HttpResponse, String> {
+    crate::telemetry::bump("rest.execute");
     // 1. Load request from DB
     let request = sqlx::query_as::<_, Request>("SELECT * FROM requests WHERE id = ?")
         .bind(&request_id)
@@ -203,6 +204,18 @@ pub async fn execute_request(
     .fetch_all(pool.inner())
     .await
     .map_err(|e| format!("Failed to load params: {}", e))?;
+
+    // Did the user reference an env var anywhere? Cheap textual scan
+    // across the surfaces resolve_variables() runs over. One bump per
+    // request — not per substitution — so we don't over-count.
+    if request.url.contains("{{")
+        || request.body.contains("{{")
+        || request.auth_data.contains("{{")
+        || headers.iter().any(|h| h.key.contains("{{") || h.value.contains("{{"))
+        || params.iter().any(|p| p.key.contains("{{") || p.value.contains("{{"))
+    {
+        crate::telemetry::bump("rest.env_var_used");
+    }
 
     // 2. Load environment variables
     let vars = if !environment_id.is_empty() {
@@ -304,11 +317,19 @@ pub async fn execute_request(
             }
         }
         "api-key" => {
+            // `add_to` defaults to "header" — historically this was always
+            // appended as a header regardless of what the user picked in the
+            // UI, silently breaking the "Query Param" option.
             if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&resolved_auth_data) {
                 let key = auth["key"].as_str().unwrap_or("");
                 let value = auth["value"].as_str().unwrap_or("");
+                let add_to = auth["add_to"].as_str().unwrap_or("header");
                 if !key.is_empty() {
-                    req_builder = req_builder.header(key, value);
+                    if add_to == "query" {
+                        req_builder = req_builder.query(&[(key, value)]);
+                    } else {
+                        req_builder = req_builder.header(key, value);
+                    }
                 }
             }
         }
@@ -336,6 +357,7 @@ pub async fn execute_request(
 
     // 7. Read response
     let status = response.status().as_u16();
+    if status >= 500 { crate::telemetry::bump("err.http_5xx"); }
     let status_text = response
         .status()
         .canonical_reason()
@@ -432,6 +454,7 @@ pub async fn quick_execute(
     auth_data: Option<String>,
     body_type: Option<String>,
 ) -> Result<HttpResponse, String> {
+    crate::telemetry::bump("rest.execute");
     // Load environment variables if an environment is selected
     let vars = if !environment_id.is_empty() {
         crate::db::models::load_env_vars(pool.inner(), &environment_id).await
@@ -521,11 +544,17 @@ pub async fn quick_execute(
             }
         }
         "api-key" => {
+            // See execute_request — honors `add_to` so "Query Param" works.
             if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&resolved_auth) {
                 let key = auth["key"].as_str().unwrap_or("");
                 let value = auth["value"].as_str().unwrap_or("");
+                let add_to = auth["add_to"].as_str().unwrap_or("header");
                 if !key.is_empty() {
-                    req_builder = req_builder.header(key, value);
+                    if add_to == "query" {
+                        req_builder = req_builder.query(&[(key, value)]);
+                    } else {
+                        req_builder = req_builder.header(key, value);
+                    }
                 }
             }
         }
@@ -539,6 +568,7 @@ pub async fn quick_execute(
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let status = response.status().as_u16();
+    if status >= 500 { crate::telemetry::bump("err.http_5xx"); }
     let status_text = response
         .status()
         .canonical_reason()
@@ -735,11 +765,19 @@ pub async fn execute_request_internal(
             }
         }
         "api-key" => {
+            // `add_to` defaults to "header" — historically this was always
+            // appended as a header regardless of what the user picked in the
+            // UI, silently breaking the "Query Param" option.
             if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&resolved_auth_data) {
                 let key = auth["key"].as_str().unwrap_or("");
                 let value = auth["value"].as_str().unwrap_or("");
+                let add_to = auth["add_to"].as_str().unwrap_or("header");
                 if !key.is_empty() {
-                    req_builder = req_builder.header(key, value);
+                    if add_to == "query" {
+                        req_builder = req_builder.query(&[(key, value)]);
+                    } else {
+                        req_builder = req_builder.header(key, value);
+                    }
                 }
             }
         }
@@ -751,6 +789,7 @@ pub async fn execute_request_internal(
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let status = response.status().as_u16();
+    if status >= 500 { crate::telemetry::bump("err.http_5xx"); }
     let status_text = response
         .status()
         .canonical_reason()
@@ -986,11 +1025,17 @@ pub async fn quick_execute_internal(
             }
         }
         "api-key" => {
+            // See execute_request — honors `add_to` so "Query Param" works.
             if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&resolved_auth) {
                 let key = auth["key"].as_str().unwrap_or("");
                 let value = auth["value"].as_str().unwrap_or("");
+                let add_to = auth["add_to"].as_str().unwrap_or("header");
                 if !key.is_empty() {
-                    req_builder = req_builder.header(key, value);
+                    if add_to == "query" {
+                        req_builder = req_builder.query(&[(key, value)]);
+                    } else {
+                        req_builder = req_builder.header(key, value);
+                    }
                 }
             }
         }
@@ -1002,6 +1047,7 @@ pub async fn quick_execute_internal(
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let status = response.status().as_u16();
+    if status >= 500 { crate::telemetry::bump("err.http_5xx"); }
     let status_text = response.status().canonical_reason().unwrap_or("").to_string();
     let response_headers: Vec<(String, String)> = response.headers().iter()
         .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))

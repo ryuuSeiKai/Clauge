@@ -7,6 +7,7 @@
   import { activeTabId, tabs, markDirty, setDraft, getDraft, updateTab } from '$lib/shared/stores/tabs';
   import { parseCurl } from '$lib/modes/rest/utils/curl-parser';
   import { showToast } from '$lib/shared/primitives/toast';
+  import { invoke } from '@tauri-apps/api/core';
   import ReqEnvPill from './ReqEnvPill.svelte';
   import { tick } from 'svelte';
 
@@ -29,6 +30,22 @@
   let urlFocused = $state(false);
   let suppressRender = false;
   let justSelected = false;
+
+  // ── URL undo/redo stack ────────────────────────────────────────────
+  // The URL editor is a contenteditable div whose innerHTML is rewritten
+  // on every keystroke (syntax colouring + variable chips). Each rewrite
+  // wipes the browser's native undo history, so Cmd+Z / Cmd+Shift+Z do
+  // nothing. We keep our own stack of {value, cursor} snapshots and
+  // intercept the shortcuts in handleKeydown. Snapshots are throttled by
+  // URL_UNDO_DEBOUNCE_MS so a continuous burst of typing collapses into
+  // a single undo entry (Postman/Insomnia do the same).
+  const URL_UNDO_MAX = 100;
+  const URL_UNDO_DEBOUNCE_MS = 350;
+  type UrlSnap = { value: string; cursor: number };
+  let undoStack: UrlSnap[] = [];
+  let redoStack: UrlSnap[] = [];
+  let lastSnapAt = 0;
+  let lastSnapValue = '';
 
   let localMethod = $state('GET');
   let localUrl = $state('');
@@ -319,10 +336,90 @@
     sel.addRange(range);
   }
 
+  // Push a snapshot of the current value+cursor onto the undo stack.
+  // Coalesces rapid edits within URL_UNDO_DEBOUNCE_MS into one entry.
+  function pushUndoSnapshot(value: string, cursor: number) {
+    if (value === lastSnapValue) return;
+    const now = Date.now();
+    const coalesce = now - lastSnapAt < URL_UNDO_DEBOUNCE_MS && undoStack.length > 0;
+    if (coalesce) {
+      // Replace the top entry so a burst of typing collapses into one undo.
+      undoStack[undoStack.length - 1] = { value, cursor };
+    } else {
+      undoStack.push({ value, cursor });
+      if (undoStack.length > URL_UNDO_MAX) undoStack.shift();
+    }
+    redoStack.length = 0; // any new edit invalidates redo
+    lastSnapAt = now;
+    lastSnapValue = value;
+  }
+
+  // Reset history when the active tab/request changes — undo across
+  // unrelated URLs would be surprising. Seed the stack with the current
+  // value so the first user edit has a baseline to roll back to.
+  //
+  // BUG GUARD: this effect subscribes to the whole $activeRequest store,
+  // so handleInput's `activeRequest.update(...)` re-fires it on every
+  // keystroke. Without the early-return below the stack would be wiped
+  // on every input and Cmd+Z would no-op. We compare against externally-
+  // held lastSeen* state so the reset only runs on a real tab/request
+  // switch, not on a same-request URL mutation.
+  let lastSeenTabId = -999;
+  let lastSeenReqId = '__init__';
+  $effect(() => {
+    const tabId = $activeTabId;
+    const reqId = $activeRequest?.id ?? '';
+    if (tabId === lastSeenTabId && reqId === lastSeenReqId) return;
+    lastSeenTabId = tabId;
+    lastSeenReqId = reqId;
+    undoStack = [{ value: url, cursor: url.length }];
+    redoStack = [];
+    lastSnapAt = 0;
+    lastSnapValue = url;
+  });
+
+  function applyUrlSnapshot(snap: UrlSnap) {
+    suppressRender = true;
+    const tabId = $activeTabId;
+    if ($activeRequest) {
+      activeRequest.update(r => r ? { ...r, url: snap.value } : r);
+      setDraft(tabId, { url: snap.value });
+      markDirty(tabId);
+    } else {
+      localUrl = snap.value;
+      setDraft(tabId, { url: snap.value });
+      markDirty(tabId);
+    }
+    renderToEditor(snap.value);
+    restoreCursor(snap.cursor);
+    lastSnapValue = snap.value;
+    // Force any subsequent edit to create a fresh undo entry instead of
+    // coalescing into the stale top entry from before the undo.
+    lastSnapAt = 0;
+    requestAnimationFrame(() => { suppressRender = false; });
+  }
+
+  function urlUndo() {
+    if (undoStack.length <= 1) return;
+    const current = undoStack.pop()!;
+    redoStack.push(current);
+    const prev = undoStack[undoStack.length - 1];
+    applyUrlSnapshot(prev);
+  }
+
+  function urlRedo() {
+    if (redoStack.length === 0) return;
+    const next = redoStack.pop()!;
+    undoStack.push(next);
+    applyUrlSnapshot(next);
+  }
+
   function handleInput() {
     suppressRender = true;
     const cursorPos = getCursorOffset();
     const value = extractValue();
+
+    pushUndoSnapshot(value, cursorPos);
 
     const tabId = $activeTabId;
     if ($activeRequest) {
@@ -355,7 +452,39 @@
     requestAnimationFrame(() => { suppressRender = false; });
   }
 
+  // WKWebView (Tauri's renderer on macOS) sometimes routes Cmd+Z through
+  // `beforeinput` with inputType `historyUndo` BEFORE the keydown handler
+  // can preventDefault — the native undo runs against a stale DOM that
+  // our innerHTML rewrites already corrupted. Catching `beforeinput`
+  // explicitly is the only reliable interception point in that engine.
+  function handleBeforeInput(e: InputEvent) {
+    if (e.inputType === 'historyUndo') {
+      e.preventDefault();
+      urlUndo();
+    } else if (e.inputType === 'historyRedo') {
+      e.preventDefault();
+      urlRedo();
+    }
+  }
+
   function handleKeydown(e: KeyboardEvent) {
+    // Manual undo/redo — native contenteditable undo is dead because
+    // we rewrite innerHTML on every input. Intercept BEFORE the browser
+    // handles them so we don't fight the (broken) native stack.
+    const isMod = e.metaKey || e.ctrlKey;
+    if (isMod && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      if (e.shiftKey) urlRedo();
+      else urlUndo();
+      return;
+    }
+    if (isMod && (e.key === 'y' || e.key === 'Y')) {
+      // Windows-style redo
+      e.preventDefault();
+      urlRedo();
+      return;
+    }
+
     if (e.key === 'Enter') {
       e.preventDefault();
       if (acOpen && acItems.length > 0) {
@@ -441,6 +570,9 @@
     // Extract value and figure out cursor position
     suppressRender = true;
     const newValue = extractValue();
+    // Force a fresh undo entry (don't coalesce with previous typing).
+    lastSnapAt = 0;
+    pushUndoSnapshot(newValue, newValue.length);
     // Find where {{varName}} ends in the full plain text
     const chipPattern = `{{${varName}}}`;
     const chipIdx = newValue.lastIndexOf(chipPattern);
@@ -476,6 +608,7 @@
       e.preventDefault();
       const parsed = parseCurl(trimmed);
       if (!parsed) return;
+      invoke('telemetry_bump', { key: 'rest.curl_paste' }).catch(() => {});
 
       const tabId = $activeTabId;
 
@@ -525,6 +658,9 @@
           sel.addRange(range);
         }
       }
+      // Distinct undo entry for the paste so Cmd+Z rolls back the import.
+      lastSnapAt = 0;
+      pushUndoSnapshot(parsed.url, parsed.url.length);
 
       showToast('Imported from cURL', 'success');
       return;
@@ -585,6 +721,7 @@
       tabindex="0"
       data-placeholder="Enter URL or &#123;&#123;variable&#125;&#125;"
       oninput={handleInput}
+      onbeforeinput={handleBeforeInput}
       onkeydown={handleKeydown}
       onpaste={handlePaste}
       onfocus={handleFocus}

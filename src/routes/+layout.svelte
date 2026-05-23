@@ -1061,8 +1061,9 @@
                         if (remoteHas) showSyncRestorePrompt.set(true);
                         else markSynced();
                     } catch (e) {
+                        // Don't markSynced — a transient network blip
+                        // shouldn't permanently dismiss the restore option.
                         console.warn("[Cloud] remote check failed:", e);
-                        markSynced();
                     }
                 } else if (!get(hasSyncedOnce)) {
                     // Local has data but we've never synced — fire a one-shot push so

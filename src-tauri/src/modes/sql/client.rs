@@ -880,7 +880,14 @@ pub async fn ensure_pool_inner(
         }
     }
     let config = load_saved_config(app_pool, conn_id, database).await?;
-    let (pool, tunnel) = create_pool_with_tunnel(&config, Some(app_pool)).await?;
+    let (pool, tunnel) = match create_pool_with_tunnel(&config, Some(app_pool)).await {
+        Ok(v) => v,
+        Err(e) => {
+            // Count category, not message — we never log the host.
+            crate::telemetry::bump("err.sql_connect_fail");
+            return Err(e);
+        }
+    };
     // Race-safe insert — if another caller raced ahead, drop the duplicate.
     let mut conns = manager.connections.lock().await;
     if conns.contains_key(&key) {
@@ -1162,6 +1169,7 @@ pub async fn sql_execute_query(
     query: String,
     query_id: String,
 ) -> Result<SqlQueryResult, String> {
+    crate::telemetry::bump("sql.execute");
     let key = pool_key(&conn_id, &database);
     ensure_pool_inner(manager.inner(), app_pool.inner(), &conn_id, &database).await?;
 

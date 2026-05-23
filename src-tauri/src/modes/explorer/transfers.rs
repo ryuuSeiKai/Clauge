@@ -88,6 +88,7 @@ pub async fn explorer_upload_file(
     local_path: String,
     remote_path: String,
 ) -> Result<(), String> {
+    crate::telemetry::bump("explorer.transfer");
     let fs = sessions
         .get(&tab_key)
         .await
@@ -254,6 +255,7 @@ pub async fn explorer_download_file(
     remote_path: String,
     local_path: String,
 ) -> Result<(), String> {
+    crate::telemetry::bump("explorer.transfer");
     use futures::StreamExt;
     let fs = sessions
         .get(&tab_key)

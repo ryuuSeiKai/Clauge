@@ -944,6 +944,7 @@ pub async fn export_as_curl(
     request_id: String,
     environment_id: Option<String>,
 ) -> Result<String, String> {
+    crate::telemetry::bump("rest.curl_export");
     let request = sqlx::query_as::<_, Request>("SELECT * FROM requests WHERE id = ?")
         .bind(&request_id)
         .fetch_one(pool.inner())
@@ -1000,14 +1001,58 @@ pub async fn export_as_curl(
     }
 
     // Auth
+    //
+    // auth_data is always a JSON blob (e.g. `{"token":"…"}`,
+    // `{"username":"…","password":"…"}`). The bearer branch used to
+    // dump the entire blob after `Bearer ` — producing nonsense like
+    // `Authorization: Bearer {"token":"{{platformToken}}"}`. Parse it
+    // and emit just the token. Same goes for api-key which was missing
+    // from the export entirely.
     if request.auth_type == "bearer" && !request.auth_data.is_empty() {
-        let token = resolve(&request.auth_data);
-        cmd += &format!(" \\\n  -H 'Authorization: Bearer {}'", token);
+        if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&request.auth_data) {
+            let token = auth["token"].as_str().unwrap_or("");
+            if !token.is_empty() {
+                cmd += &format!(" \\\n  -H 'Authorization: Bearer {}'", resolve(token));
+            }
+        }
     } else if request.auth_type == "basic" && !request.auth_data.is_empty() {
         if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&request.auth_data) {
             let user = auth["username"].as_str().unwrap_or("");
             let pass = auth["password"].as_str().unwrap_or("");
             cmd += &format!(" \\\n  -u '{}:{}'", resolve(user), resolve(pass));
+        }
+    } else if request.auth_type == "api-key" && !request.auth_data.is_empty() {
+        if let Ok(auth) = serde_json::from_str::<serde_json::Value>(&request.auth_data) {
+            let key = auth["key"].as_str().unwrap_or("");
+            let value = auth["value"].as_str().unwrap_or("");
+            let add_to = auth["add_to"].as_str().unwrap_or("header");
+            if !key.is_empty() {
+                if add_to == "query" {
+                    // Append to URL query string. URL already has either
+                    // `?` (from request_params) or none — match the
+                    // existing separator pattern used elsewhere.
+                    let sep = if cmd.contains('?') { '&' } else { '?' };
+                    // We need to splice the param into the URL portion
+                    // of the curl line, NOT after -H flags. Easiest: it
+                    // was the last token before flags. Replace the URL.
+                    // Simpler approach: emit a -G \\\n -d shape that
+                    // curl treats as query params on a GET. But that
+                    // only works for GET. Fallback: just edit `cmd` URL.
+                    //
+                    // Practical: rebuild with the param appended. The
+                    // URL is the first quoted token in `cmd` — slice
+                    // and patch.
+                    if let Some(start) = cmd.find('\'') {
+                        if let Some(end) = cmd[start + 1..].find('\'') {
+                            let url_end = start + 1 + end;
+                            let inject = format!("{}{}={}", sep, resolve(key), resolve(value));
+                            cmd.insert_str(url_end, &inject);
+                        }
+                    }
+                } else {
+                    cmd += &format!(" \\\n  -H '{}: {}'", resolve(key), resolve(value));
+                }
+            }
         }
     }
 

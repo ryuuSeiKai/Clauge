@@ -1,4 +1,6 @@
 <script lang="ts">
+  import EnvInput from '$lib/shared/primitives/EnvInput.svelte';
+
   interface FormField {
     key: string;
     value: string;
@@ -77,13 +79,13 @@
           value={field.key}
           oninput={(e) => updateField(i, 'key', (e.target as HTMLInputElement).value)}
         />
-        <input
-          class="form-kv-input form-kv-val"
-          type="text"
-          placeholder="Value"
-          value={field.value}
-          oninput={(e) => updateField(i, 'value', (e.target as HTMLInputElement).value)}
-        />
+        <div class="form-kv-val-wrap">
+          <EnvInput
+            value={field.value}
+            placeholder="Value"
+            onchange={(v) => updateField(i, 'value', v)}
+          />
+        </div>
         <button class="form-kv-del" onclick={() => removeRow(i)} title="Remove">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -141,7 +143,7 @@
   .form-kv-input::placeholder { color: var(--t4); }
 
   .form-kv-key { flex: 1; min-width: 0; }
-  .form-kv-val { flex: 2; min-width: 0; }
+  .form-kv-val-wrap { flex: 2; min-width: 0; }
 
   .form-kv-del {
     width: 22px;

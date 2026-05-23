@@ -138,6 +138,7 @@ pub fn tools_for_mode(mode: &str) -> Vec<ToolDescriptor> {
 /// the requested tool, returns `"Unknown tool: <name>"` to match historical
 /// behaviour exactly.
 pub async fn execute<'a>(tool_name: &str, ctx: ToolContext<'a>) -> String {
+    crate::telemetry::bump("ai.tool_call");
     let safe_keys: Vec<String> = ctx
         .input
         .as_object()

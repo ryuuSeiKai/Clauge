@@ -99,13 +99,28 @@ function splitEqualsFlag(tok: string): [string, string] | null {
  */
 export function parseCurl(text: string): ParsedCurl | null {
   // Normalize line continuations across all three shell flavours, then
-  // collapse the stray standalone `^` that cmd uses outside of
-  // continuations as an escape (e.g. `^&`, `^"` outside a string).
+  // decode cmd.exe caret-escapes so the tokenizer downstream sees plain
+  // Unix-style quoted strings. Chrome DevTools "Copy as cURL (cmd)"
+  // wraps every arg in `^"…^"` and (on some Chrome builds) closes with
+  // the unusual `^%22` sequence — both must collapse to `"`.
   const normalized = text
-    .replace(/\\\s*\n/g, ' ')   // Unix / Git Bash backslash continuation
-    .replace(/\^\s*\n/g, ' ')   // cmd.exe caret continuation
-    .replace(/`\s*\n/g, ' ')    // PowerShell backtick continuation
-    .replace(/\^(\s)/g, '$1')   // Standalone ^ used as Windows continuation
+    // 1. Strip line continuations first so escapes that span lines work.
+    .replace(/\\\r?\n/g, ' ')          // Unix / Git Bash backslash continuation
+    .replace(/\^\r?\n/g, ' ')          // cmd.exe caret continuation
+    .replace(/`\r?\n/g, ' ')           // PowerShell backtick continuation
+    // 2. cmd.exe caret-escape decoding. Order matters: `^^` LAST so that
+    //    a real `^^"` collapses to `^"` (caret then quote), not `""`.
+    .replace(/\^%22/g, '"')            // Chrome cmd quirk: closing-quote escape
+    .replace(/\^"/g, '"')              // Standard cmd caret-escaped quote
+    .replace(/\^&/g, '&')              // Caret-escaped & (URL separators)
+    .replace(/\^</g, '<')
+    .replace(/\^>/g, '>')
+    .replace(/\^\|/g, '|')
+    .replace(/\^%/g, '%')              // Caret-escaped % (cmd var-expansion guard)
+    .replace(/\^\^/g, '^')             // Literal caret (must come after the above)
+    // 3. Any remaining standalone `^` immediately before whitespace —
+    //    legacy continuation residue.
+    .replace(/\^(\s)/g, '$1')
     .trim();
 
   // Accept `curl`, `curl.exe`, `CURL.EXE`, etc. PowerShell users invoke

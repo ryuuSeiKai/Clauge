@@ -153,8 +153,6 @@
     } catch { return ''; }
   }
 
-  let showRestoreConfirm = $state(false);
-
   async function handleSyncNow() {
     if ($syncing) return;
     setSyncing(true);
@@ -173,8 +171,11 @@
     }
   }
 
-  async function handleRestoreConfirmed() {
-    showRestoreConfirm = false;
+  // Handle the "cloud data found on first connect" prompt — pulls all
+  // domains, marks synced, then fires the post-restore "re-enter your
+  // secrets" banner (which subsumes the success toast when relevant).
+  async function handleFirstConnectRestore() {
+    showSyncRestorePrompt.set(false);
     setSyncing(true);
     try {
       await cloudSyncRestore();
@@ -186,11 +187,6 @@
         loadSqlScripts(),
       ]);
       markSynced();
-      // The post-restore banner subsumes the success toast when there
-      // are credentials to re-enter — its copy already says "Restored
-      // from cloud" up front, and stacking both would be noisy. We only
-      // toast when the banner doesn't fire (clean restore, nothing to
-      // remind the user about).
       const { announceRestoreCompletion } = await import('$lib/stores/missingCredentials');
       const shown = await announceRestoreCompletion();
       if (!shown) showToast('Restored from cloud', 'success');
@@ -199,12 +195,6 @@
     } finally {
       setSyncing(false);
     }
-  }
-
-  // Handle the "cloud data found on first connect" prompt
-  async function handleFirstConnectRestore() {
-    showSyncRestorePrompt.set(false);
-    await handleRestoreConfirmed();
   }
 
   function handleFirstConnectSkip() {
@@ -236,7 +226,7 @@
     profileMenuOpen = false;
     switch (action) {
       case 'sync': openSettingsTab('account'); break;
-      case 'settings': openSettingsTab('general'); break;
+      case 'settings': openSettingsTab('account'); break;
       case 'check-updates': handleCheckForUpdates(); break;
       case 'whats-new': openExternal('https://clauge.in/changelog.html'); break;
       case 'report': openExternal('https://github.com/ansxuman/Clauge/issues/new'); break;
@@ -376,36 +366,21 @@
 
 <ConflictResolverModal bind:show={conflictResolverOpen} />
 
-<!-- Restore confirm: when Sync Now is clicked but local is empty -->
-{#if showRestoreConfirm}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="sync-confirm-overlay" onclick={() => showRestoreConfirm = false}>
-    <div class="sync-confirm" onclick={(e) => e.stopPropagation()}>
-      <div class="sync-confirm-icon">
-        <svg viewBox="0 0 24 24" width="28" height="28"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-      </div>
-      <div class="sync-confirm-title">Local data is empty</div>
-      <div class="sync-confirm-desc">Would you like to restore your data from cloud?</div>
-      <div class="sync-confirm-actions">
-        <button class="sync-confirm-btn" onclick={() => showRestoreConfirm = false}>Cancel</button>
-        <button class="sync-confirm-btn primary" onclick={handleRestoreConfirmed}>Restore from Cloud</button>
-      </div>
-    </div>
-  </div>
-{/if}
-
-<!-- First-connect restore prompt: when existing cloud data found -->
+<!-- First-connect restore prompt: when existing cloud data found.
+     Overlay click is NOT bound to skip — a misclick outside the modal
+     used to call markSynced() which permanently dismissed the prompt
+     (`hasSyncedOnce` is persisted to localStorage). The user has to
+     click Skip explicitly. -->
 {#if $showSyncRestorePrompt}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="sync-confirm-overlay" onclick={handleFirstConnectSkip}>
+  <div class="sync-confirm-overlay">
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="sync-confirm" onclick={(e) => e.stopPropagation()}>
       <div class="sync-confirm-icon">
         <svg viewBox="0 0 24 24" width="28" height="28"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       </div>
       <div class="sync-confirm-title">Cloud backup found</div>
-      <div class="sync-confirm-desc">Your GitHub account has existing data. Would you like to restore it?</div>
+      <div class="sync-confirm-desc">Your account has data saved in the cloud. Restoring replaces this device's REST collections, SQL/NoSQL connections, agents, SSH profiles, explorer paths, and workspace coworkers with the cloud copy.</div>
       <div class="sync-confirm-actions">
         <button class="sync-confirm-btn" onclick={handleFirstConnectSkip}>Skip</button>
         <button class="sync-confirm-btn primary" onclick={handleFirstConnectRestore}>Restore</button>

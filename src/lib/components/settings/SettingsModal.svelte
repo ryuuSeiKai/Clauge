@@ -108,6 +108,7 @@
         | "workspace"
         | "sql"
         | "nosql"
+        | "explorer"
         | "about";
 
     let activeTab = $state<SettingsTab>("general");
@@ -210,6 +211,16 @@
         Number($settings["nosql_max_find_limit"] ?? "100"),
     );
 
+    // --- Explorer ---
+    // S3/Azure folder listings can recursively walk every subfolder to
+    // compute aggregate folder sizes. On large buckets this slows
+    // navigation from sub-second to multi-second. Default OFF; the user
+    // opts in when accurate sizes matter more than latency. Backend
+    // reads on session open, so changes apply on next reconnect.
+    let explorerShowFolderSizes = $derived(
+        ($settings["explorer_show_folder_sizes"] ?? "false") === "true",
+    );
+
     // --- Editor ---
 
     // --- Proxy ---
@@ -217,6 +228,14 @@
     let proxyAuth = $derived(($settings["proxy_auth"] ?? "false") === "true");
     let proxyUsername = $derived($settings["proxy_username"] ?? "");
     let proxyPassword = $derived($settings["proxy_password"] ?? "");
+
+    // --- Privacy / telemetry ---
+    // Telemetry is opt-IN by default (false === sending). The toggle
+    // below flips `telemetry_optout`; UI label is positive ("Share
+    // anonymous usage data") so the checkbox feels intuitive.
+    let telemetryOptedOut = $derived(
+        ($settings["telemetry_optout"] ?? "false") === "true",
+    );
 
     // --- Logs ---
     let logDir = $state("");
@@ -726,6 +745,13 @@
             label: "NoSQL",
             // Curly braces — matches NoSQL identity in Topbar.
             icon: '<path d="M8 3a2 2 0 00-2 2v4a2 2 0 01-2 2H3a1 1 0 000 2h1a2 2 0 012 2v4a2 2 0 002 2"/><path d="M16 3a2 2 0 012 2v4a2 2 0 002 2h1a1 1 0 010 2h-1a2 2 0 00-2 2v4a2 2 0 01-2 2"/>',
+        },
+        {
+            kind: "tab",
+            key: "explorer",
+            label: "Explorer",
+            // Folder — matches Explorer identity in Topbar.
+            icon: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>',
         },
         {
             kind: "tab",
@@ -1714,6 +1740,57 @@
                                         </svg>
                                         <span>Clear History</span>
                                     </button>
+                                </div>
+                            </div>
+                        </section>
+
+                        <!-- Privacy / telemetry card -->
+                        <section class="stg-card">
+                            <header class="stg-card-hd">
+                                <span class="stg-card-icon" aria-hidden="true">
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        width="14"
+                                        height="14"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                    >
+                                        <path
+                                            d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"
+                                        />
+                                    </svg>
+                                </span>
+                                <div class="stg-card-titles">
+                                    <h3 class="stg-card-title">Privacy</h3>
+                                    <p class="stg-card-sub">
+                                        Help improve Clauge with anonymous
+                                        usage data.
+                                    </p>
+                                </div>
+                            </header>
+                            <div class="stg-card-body">
+                                <div class="stg-card-row">
+                                    <label class="stg-card-row-label"
+                                        >Share anonymous usage data</label
+                                    >
+                                    <label class="stg-toggle">
+                                        <input
+                                            type="checkbox"
+                                            checked={!telemetryOptedOut}
+                                            onchange={(e) =>
+                                                handleSettingChange(
+                                                    "telemetry_optout",
+                                                    String(
+                                                        !e.currentTarget
+                                                            .checked,
+                                                    ),
+                                                )}
+                                        />
+                                        <span class="stg-toggle-slider"></span>
+                                    </label>
                                 </div>
                             </div>
                         </section>
@@ -4842,6 +4919,62 @@
                                                 e.currentTarget.value,
                                             )}
                                     />
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                {:else if activeTab === "explorer"}
+                    <div class="stg-card-stack">
+                        <section class="stg-card">
+                            <header class="stg-card-hd">
+                                <span class="stg-card-icon" aria-hidden="true">
+                                    <svg
+                                        viewBox="0 0 24 24"
+                                        width="14"
+                                        height="14"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        stroke-width="2"
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        ><path
+                                            d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"
+                                        /></svg
+                                    >
+                                </span>
+                                <div class="stg-card-titles">
+                                    <h3 class="stg-card-title">Listing</h3>
+                                    <p class="stg-card-sub">
+                                        Defaults for the Explorer file browser.
+                                        Folder-size aggregation walks every
+                                        object under each subfolder — accurate,
+                                        but adds N×pages extra round-trips per
+                                        listing on object stores (S3, Azure).
+                                        Off keeps folder navigation snappy on
+                                        large buckets. Change takes effect on
+                                        the next connection.
+                                    </p>
+                                </div>
+                            </header>
+                            <div class="stg-card-body">
+                                <div class="stg-card-row">
+                                    <label class="stg-card-row-label"
+                                        >Show folder sizes (S3, Azure)</label
+                                    >
+                                    <label class="stg-toggle">
+                                        <input
+                                            type="checkbox"
+                                            checked={explorerShowFolderSizes}
+                                            onchange={(e) =>
+                                                handleSettingChange(
+                                                    "explorer_show_folder_sizes",
+                                                    String(
+                                                        e.currentTarget.checked,
+                                                    ),
+                                                )}
+                                        />
+                                        <span class="stg-toggle-slider"></span>
+                                    </label>
                                 </div>
                             </div>
                         </section>

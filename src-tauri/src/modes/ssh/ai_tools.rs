@@ -16,6 +16,7 @@ use crate::shared::ai::types::PendingFrontendTools;
 use crate::shared::ai::dispatch::{register, ToolContext, ToolDescriptor, ToolFuture};
 
 fn execute_shell<'a>(ctx: &'a ToolContext<'a>) -> ToolFuture<'a> {
+    crate::telemetry::bump("ssh.execute_shell");
     Box::pin(async move {
         let app = ctx.app;
         let tool_use_id = ctx.tool_use_id;

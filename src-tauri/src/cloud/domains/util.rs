@@ -138,6 +138,19 @@ pub async fn insert_row(
     Ok(())
 }
 
+/// Public alias used by domain importers that need to drive their own
+/// UPSERT statement (e.g. coworkers, which can't use the DELETE+INSERT
+/// pattern in `insert_row` because of FK references that would get
+/// nulled). The standard `insert_row` helper handles the common case
+/// — this is the escape hatch for when the bind logic is needed
+/// outside that helper.
+pub fn bind_value_to_query<'q>(
+    q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
+    v: &'q Value,
+) -> sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>> {
+    bind_value(q, v)
+}
+
 fn bind_value<'q>(
     q: sqlx::query::Query<'q, sqlx::Sqlite, sqlx::sqlite::SqliteArguments<'q>>,
     v: &'q Value,

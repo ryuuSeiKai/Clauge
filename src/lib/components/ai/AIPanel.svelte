@@ -500,6 +500,11 @@
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
+    // Telemetry: bucketed count of user-sent AI chat messages over 24h.
+    // Fire-and-forget; never awaited or rethrown so a registry blip
+    // (e.g. backend not yet ready on cold boot) can't block the send.
+    invoke('telemetry_bump', { key: 'ai.chat' }).catch(() => {});
+
     // Resolve provider + api key. Clauge AI is just another provider — but
     // its "api key" is the user's cloud bearer token (fetched at send time)
     // and it needs an X-Provider header so the worker can pick the right

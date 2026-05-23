@@ -1,5 +1,6 @@
 <script lang="ts">
   import { open } from '@tauri-apps/plugin-dialog';
+  import EnvInput from '$lib/shared/primitives/EnvInput.svelte';
 
   interface MultipartField {
     key: string;
@@ -125,13 +126,13 @@
             {field.fileName || 'Choose File'}
           </button>
         {:else}
-          <input
-            class="mp-input mp-val"
-            type="text"
-            placeholder="Value"
-            value={field.value}
-            oninput={(e) => updateField(i, 'value', (e.target as HTMLInputElement).value)}
-          />
+          <div class="mp-val-wrap">
+            <EnvInput
+              value={field.value}
+              placeholder="Value"
+              onchange={(v) => updateField(i, 'value', v)}
+            />
+          </div>
         {/if}
         <button class="mp-del" onclick={() => removeRow(i)} title="Remove">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -178,7 +179,7 @@
   .mp-input::placeholder { color: var(--t4); }
 
   .mp-key { flex: 1; min-width: 0; }
-  .mp-val { flex: 2; min-width: 0; }
+  .mp-val-wrap { flex: 2; min-width: 0; }
 
   .mp-type-sel {
     height: 28px; padding: 0 4px;

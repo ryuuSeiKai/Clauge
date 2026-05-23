@@ -48,6 +48,7 @@ pub fn agent_spawn_terminal(
     workspace_mcp_token: Option<String>,
     on_output: Channel<TerminalOutputPayload>,
 ) -> Result<String, String> {
+    crate::telemetry::bump("agent.spawn");
     let terminal_id = Uuid::new_v4().to_string();
     let pty_system = native_pty_system();
     let pty_pair = pty_system
