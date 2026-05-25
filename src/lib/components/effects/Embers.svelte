@@ -4,14 +4,16 @@
   // they reach the top. Pure CSS animation (`mix-blend-mode: screen` adds
   // the warm light over dark chrome without obscuring text).
   //
-  // Visibility is bound to the persisted appearance.theme — non-Pro
-  // previewers see the warm palette but no embers (the embers are the
-  // upgrade carrot).
+  // Visibility is bound to `currentRenderedTheme` (written by `applyTheme()`),
+  // NOT the persisted `appearance.theme`. Non-Pro users PREVIEWING Hearth
+  // see the full ember effect so they understand what they're paying for.
+  // Persistence is still Pro-gated upstream in
+  // `SettingsModal.handleThemeChange`.
   //
   // Respects `prefers-reduced-motion: reduce` (embers hidden entirely).
-  import { appearance } from "$lib/stores/settings";
+  import { currentRenderedTheme } from "$lib/utils/theme";
 
-  let active = $derived($appearance.theme === "hearth");
+  let active = $derived($currentRenderedTheme === "hearth");
 
   // Deterministic per-ember properties — using indexed pseudo-random math
   // (not Math.random()) so SSR hydration matches and ember positions are

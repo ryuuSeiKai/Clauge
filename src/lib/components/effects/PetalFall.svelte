@@ -4,14 +4,16 @@
   // its own duration / drift / rotation profile so they don't fall in
   // lockstep; staggered start delays keep the sky continuously populated.
   //
-  // Visibility is bound to the persisted appearance.theme — non-Pro
-  // previewers see the plum palette but no petals (the petals are the
-  // upgrade carrot).
+  // Visibility is bound to `currentRenderedTheme` (written by `applyTheme()`),
+  // NOT the persisted `appearance.theme`. Non-Pro users PREVIEWING Petal
+  // see the falling petals so they understand what they're paying for.
+  // Persistence is still Pro-gated upstream in
+  // `SettingsModal.handleThemeChange`.
   //
   // Respects `prefers-reduced-motion: reduce` (petals hidden entirely).
-  import { appearance } from "$lib/stores/settings";
+  import { currentRenderedTheme } from "$lib/utils/theme";
 
-  let active = $derived($appearance.theme === "petal");
+  let active = $derived($currentRenderedTheme === "petal");
 
   // Deterministic per-petal properties — indexed pseudo-random (not
   // Math.random()) so SSR hydration matches and petal positions stay

@@ -3,8 +3,6 @@ import { invoke } from '@tauri-apps/api/core';
 import { STORAGE_KEYS } from '$lib/shared/constants/storage';
 import { installType, supportsSelfUpdate } from '$lib/utils/platform';
 
-export type UpdateChannel = 'stable' | 'pre';
-
 /** Toast payload for the update notification. `infoOnly` flips the toast
  *  from auto-install ("Restart to Update") to an awareness toast that
  *  sends the user to the public changelog page (with download buttons).
@@ -20,16 +18,14 @@ export interface UpdateNoticeInfo {
 // GitHub releases UI for non-developer users.
 const CHANGELOG_URL = 'https://clauge.in/changelog';
 
-/** Reads the user's update channel from localStorage. Default: stable. */
-export function getUpdateChannel(): UpdateChannel {
-  if (typeof localStorage === 'undefined') return 'stable';
-  return localStorage.getItem(STORAGE_KEYS.UPDATE_CHANNEL) === 'pre' ? 'pre' : 'stable';
-}
-
-/** Persists the user's update channel choice. */
-export function setUpdateChannel(channel: UpdateChannel): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(STORAGE_KEYS.UPDATE_CHANNEL, channel);
+// All users now follow the stable channel. The previous Settings → About
+// "Receive pre-release updates" toggle was removed; any user who had
+// previously opted into `pre` is migrated to `stable` here on module load
+// so their next update check pulls from the stable feed. The localStorage
+// key is also cleared so this migration is idempotent (no-op on subsequent
+// loads) — and the rest of this file always passes 'stable' downstream.
+if (typeof localStorage !== 'undefined') {
+  try { localStorage.removeItem(STORAGE_KEYS.UPDATE_CHANNEL); } catch { /* ignore quota / privacy mode */ }
 }
 
 let updateReadyData: UpdateNoticeInfo | null = null;
@@ -68,7 +64,11 @@ export const whatsNewContent = writable<{ version: string; body: string } | null
  */
 export async function checkAndDownloadUpdate(): Promise<UpdateNoticeInfo | null> {
   try {
-    const channel = getUpdateChannel();
+    // Stable-only after the pre-release channel was removed from Settings.
+    // Kept as a local const so the Rust signature (which still accepts a
+    // channel arg) stays untouched — flipping back is a one-line change
+    // if pre-release ever returns.
+    const channel: 'stable' | 'pre' = 'stable';
     const kind = await installType();
 
     if (kind === 'linux-package') {

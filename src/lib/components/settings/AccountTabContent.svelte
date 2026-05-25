@@ -69,14 +69,24 @@
         deleteSlugInput.trim().length > 0 &&
             deleteSlugInput.trim() === slugExpected,
     );
-    // Pro recurring users need the extra "your subscription will be cancelled"
-    // callout. Lifetime users don't (no recurring charge); free users don't
-    // (no subscription at all). Drives the yellow warning block in delete confirm.
+    // Any Pro user (recurring OR lifetime) needs to know their Pro plan +
+    // remaining credits are part of what gets deleted — used to gate the
+    // "Your Pro plan and N credits" bullet in the confirm panel.
+    let isPro = $derived($cloudPlan === "pro");
+    // Pro recurring users get a callout specifically about subscription
+    // cancellation (next renewal date, no further charges). Free + lifetime
+    // users don't see this one — different message paths for each.
     let isProRecurring = $derived(
-        $cloudPlan === "pro" &&
+        isPro &&
             !!$cloudSub &&
             !$cloudSub.isLifetime &&
             ($cloudSub.interval === "monthly" || $cloudSub.interval === "yearly"),
+    );
+    // Lifetime Pro users get their own callout — different copy because
+    // there's no recurring charge to cancel, but the one-time purchase
+    // amount IS non-refundable, which the user needs to acknowledge.
+    let isProLifetime = $derived(
+        isPro && !!$cloudSub && $cloudSub.isLifetime === true,
     );
 
     let menuOpen = $state(false);
@@ -362,12 +372,12 @@
             return;
         }
         // Snapshot BEFORE the async block — `setDisconnected()` clears
-        // `$cloudUser` and `$cloudSub`, which the derived `isProRecurring`
-        // reads from. Without this snapshot, a Pro user would get the
-        // wrong success copy ("local data intact" instead of
-        // "subscription cancelled") because the derived value reads
-        // post-disconnect state.
+        // `$cloudUser` and `$cloudSub`, which the derived flags below
+        // read from. Without these snapshots, the success toast would
+        // pick the wrong copy for Pro users because the derived values
+        // would read post-disconnect (free) state.
         const wasProRecurring = isProRecurring;
+        const wasProLifetime = isProLifetime;
         deleting = true;
         try {
             await cloudDeleteAccount(deleteSlugInput.trim());
@@ -375,7 +385,9 @@
             showToast(
                 wasProRecurring
                     ? "Account deleted and subscription cancelled"
-                    : "Account deleted — local data intact",
+                    : wasProLifetime
+                      ? "Account and lifetime Pro purchase deleted"
+                      : "Account deleted — local data intact",
                 "success",
             );
             confirmingDelete = false;
@@ -1275,6 +1287,18 @@
                                     immediately. This cannot be undone.
                                 </p>
                             </div>
+                        {:else if isProLifetime}
+                            <div class="acc-confirm-warn" role="alert">
+                                <strong>⚠ Lifetime Pro purchase</strong>
+                                <p>
+                                    Deleting your account will permanently
+                                    remove your one-time Clauge Pro Lifetime
+                                    purchase and any remaining credits. The
+                                    purchase amount is non-refundable. You
+                                    will lose access to Pro features
+                                    immediately. This cannot be undone.
+                                </p>
+                            </div>
                         {/if}
                         <p>
                             This permanently removes:
@@ -1286,10 +1310,21 @@
                             </li>
                             <li>All linked sign-in providers</li>
                             <li>All synced cloud data</li>
+                            {#if isPro}
+                                <li>
+                                    Your Pro plan{$cloudCredits?.remaining
+                                        ? ` and ${$cloudCredits.remaining.toLocaleString()} remaining Clauge AI credit${$cloudCredits.remaining === 1 ? "" : "s"}`
+                                        : ""}
+                                </li>
+                            {/if}
                             {#if isProRecurring}
                                 <li>
-                                    Your active Pro subscription (cancelled at
-                                    Polar)
+                                    Your active subscription (cancelled at
+                                    Polar — no further charges)
+                                </li>
+                            {:else if isProLifetime}
+                                <li>
+                                    Your lifetime entitlement (non-refundable)
                                 </li>
                             {/if}
                         </ul>

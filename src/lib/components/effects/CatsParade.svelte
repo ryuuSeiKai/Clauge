@@ -14,13 +14,15 @@
   //     at its current screen position, then resumes walking. Leftovers
   //     fade and disappear after ~4.5s.
   //
-  // Visibility is bound to the persisted appearance.theme — non-Pro
-  // previewers see the warm palette but not the parade (the parade is
-  // the upgrade carrot).
+  // Visibility is bound to the currently-RENDERED theme (`currentRenderedTheme`,
+  // written by `applyTheme()`), NOT the persisted `appearance.theme`. This
+  // lets non-Pro users PREVIEWING Atelier see the full parade so they
+  // understand what they're paying for. Persistence is still Pro-gated
+  // upstream in `SettingsModal.handleThemeChange`.
   //
   // Respects `prefers-reduced-motion: reduce` (parade is hidden entirely).
   import { onDestroy } from "svelte";
-  import { appearance } from "$lib/stores/settings";
+  import { currentRenderedTheme } from "$lib/utils/theme";
 
   type Dir = "left" | "right";
   type Kind = "cat" | "dog" | "bunny" | "bird";
@@ -44,7 +46,7 @@
     { kind: "bird",  color: "#e6c75a", eye: "#1c1814", accent: "#d97462", dur: 35, delay: 20, step: 0.25, dir: "left" },
   ];
 
-  let active = $derived($appearance.theme === "atelier");
+  let active = $derived($currentRenderedTheme === "atelier");
 
   // ─── Click jump ───────────────────────────────────────────────────────
   let jumping = $state<Set<number>>(new Set());

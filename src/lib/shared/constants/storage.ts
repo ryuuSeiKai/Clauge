@@ -19,6 +19,10 @@ export const STORAGE_KEYS = {
   REQUEST_ENV_OVERRIDES: 'clauge_request_env_overrides',
   SQL_ROW_LIMIT: 'clauge_sql_row_limit',
   SSH_AUTO_RUN: 'clauge_ssh_auto_run',
+  // DEPRECATED — pre-release toggle removed; key is only kept here so the
+  // one-shot migration in updater.ts (`localStorage.removeItem(...)`) can
+  // reference it. Safe to delete from this map in the next release once
+  // the migration has shipped to all existing users.
   UPDATE_CHANNEL: 'clauge_update_channel',
 } as const;
 

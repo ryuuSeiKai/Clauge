@@ -37,11 +37,6 @@
     } from "$lib/modes/workspace/commands";
     import { mcpStatus as mcpStatusStore } from "$lib/modes/workspace/stores";
     import {
-        getUpdateChannel,
-        setUpdateChannel,
-        type UpdateChannel,
-    } from "$lib/utils/updater";
-    import {
         settings,
         setSetting,
         appearance,
@@ -118,13 +113,6 @@
 
     let activeTab = $state<SettingsTab>("general");
     let appVersion = $state("");
-    let updateChannel = $state<UpdateChannel>(getUpdateChannel());
-
-    function onPreReleaseToggle(e: Event) {
-        const checked = (e.currentTarget as HTMLInputElement).checked;
-        updateChannel = checked ? "pre" : "stable";
-        setUpdateChannel(updateChannel);
-    }
 
     getVersion()
         .then((v) => {
@@ -1719,7 +1707,7 @@
                                         >Auto-clear after</label
                                     >
                                     <select
-                                        class="stg-input stg-card-input-lg"
+                                        class="stg-select stg-card-input-lg"
                                         value={chatRetention}
                                         onchange={(e) =>
                                             handleChatRetentionChange(
@@ -5198,58 +5186,6 @@
                                 An AI-powered cross-platform desktop super-app
                                 for developers. One shell, many tools.
                             </p>
-                        </section>
-
-                        <section class="stg-card">
-                            <header class="stg-card-hd">
-                                <span class="stg-card-icon" aria-hidden="true">
-                                    <svg
-                                        viewBox="0 0 24 24"
-                                        width="14"
-                                        height="14"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                        stroke-linecap="round"
-                                        stroke-linejoin="round"
-                                        ><path
-                                            d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"
-                                        /><polyline
-                                            points="7 10 12 15 17 10"
-                                        /><line
-                                            x1="12"
-                                            y1="15"
-                                            x2="12"
-                                            y2="3"
-                                        /></svg
-                                    >
-                                </span>
-                                <div class="stg-card-titles">
-                                    <h3 class="stg-card-title">Updates</h3>
-                                    <p class="stg-card-sub">
-                                        Choose the release channel Clauge checks
-                                        for new versions.
-                                    </p>
-                                </div>
-                            </header>
-                            <div class="stg-card-body">
-                                <label class="about-channel-row">
-                                    <input
-                                        type="checkbox"
-                                        checked={updateChannel === "pre"}
-                                        onchange={onPreReleaseToggle}
-                                    />
-                                    <span class="about-channel-text">
-                                        <span class="about-channel-title"
-                                            >Receive pre-release updates</span
-                                        >
-                                        <span class="about-channel-desc"
-                                            >Get alpha and beta builds before
-                                            they're stable. May contain bugs.</span
-                                        >
-                                    </span>
-                                </label>
-                            </div>
                         </section>
 
                         <section class="stg-card">

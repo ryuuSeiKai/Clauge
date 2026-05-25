@@ -1,5 +1,23 @@
 import { invoke } from '@tauri-apps/api/core';
+import { writable } from 'svelte/store';
 import { brandConfig, type BrandKey, type BrandOverride, type BrandDisplayMode } from '$lib/shared/theme/brands';
+
+/**
+ * The theme id that is CURRENTLY APPLIED to the DOM (palette + body class).
+ * Distinct from `appearance.theme` (the persisted choice) because non-Pro
+ * users can PREVIEW premium themes — `applyTheme()` runs DOM-only without
+ * persisting, so the appearance store still reads the old theme. Effect
+ * components (CatsParade, Embers, PetalFall, Starfield) MUST subscribe to
+ * this store rather than `appearance.theme` so previewers see the full
+ * theme — palette + walking critters + rising embers + falling petals +
+ * twinkling constellations — and understand what they're paying for.
+ *
+ * Updated by `applyTheme()` below — single writer, no other code path
+ * should touch this. Initial value matches the default theme in the
+ * appearance store (`dark-glass`); the layout calls `applyTheme()` on
+ * boot which corrects it to whatever the user actually has set.
+ */
+export const currentRenderedTheme = writable<string>('dark-glass');
 
 export interface Theme {
   id: string;
@@ -469,6 +487,12 @@ const themes: Record<string, Theme> = {
 export function applyTheme(themeId: string, accentColor?: string) {
   const theme = themes[themeId];
   if (!theme) return;
+
+  // Publish the currently-rendered theme id so effect components
+  // (CatsParade / Embers / PetalFall / Starfield) can render during BOTH
+  // a persisted change and a free-user preview of a Pro theme. Set
+  // BEFORE the CSS writes so subscribers fire in time with the paint.
+  currentRenderedTheme.set(themeId);
 
   const root = document.documentElement;
   root.style.setProperty('--s', theme.sidebar);

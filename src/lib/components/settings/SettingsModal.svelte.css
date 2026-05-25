@@ -592,38 +592,6 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
   }
-  .about-channel-row {
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    cursor: pointer;
-    padding: 8px 0;
-    user-select: none;
-  }
-  .about-channel-row,
-  .about-channel-row * {
-    cursor: pointer;
-  }
-  .about-channel-row input[type='checkbox'] {
-    margin-top: 3px;
-    flex-shrink: 0;
-  }
-  .about-channel-text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .about-channel-title {
-    font-size: 13px;
-    color: var(--t2);
-    font-family: var(--ui);
-  }
-  .about-channel-desc {
-    font-size: 11.5px;
-    color: var(--t4);
-    font-family: var(--ui);
-    line-height: 1.4;
-  }
   .about-tech-grid {
     display: flex;
     flex-wrap: wrap;

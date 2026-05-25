@@ -17,14 +17,16 @@
   // CSS keyframes per phase handle the line draw-in (stroke-dashoffset)
   // and per-star fade-in / pulse / fade-out.
   //
-  // Visibility is bound to the persisted appearance.theme — non-Pro
-  // previewers see the cosmic palette but no starfield (the starfield
-  // is the upgrade carrot).
+  // Visibility is bound to `currentRenderedTheme` (written by `applyTheme()`),
+  // NOT the persisted `appearance.theme`. Non-Pro users PREVIEWING Celeste
+  // see the full starfield + constellations + shooting stars so they
+  // understand what they're paying for. Persistence is still Pro-gated
+  // upstream in `SettingsModal.handleThemeChange`.
   //
   // Respects `prefers-reduced-motion: reduce` (everything hidden).
-  import { appearance } from "$lib/stores/settings";
+  import { currentRenderedTheme } from "$lib/utils/theme";
 
-  let themeActive = $derived($appearance.theme === "celeste");
+  let themeActive = $derived($currentRenderedTheme === "celeste");
 
   // ─── Layer 1: ambient stars (deterministic, stable across renders) ─
   const STAR_COUNT = 70;

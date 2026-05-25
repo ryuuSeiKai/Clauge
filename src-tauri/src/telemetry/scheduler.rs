@@ -104,7 +104,14 @@ async fn flush_once(_app: &AppHandle, pool: &SqlitePool) {
     let db_counts = collect_db_buckets(pool).await;
     let payload = assemble(device, drained, db_counts);
 
-    let bearer = bearer_token(_app).await;
+    // Use the canonical token+provider pair so attribution works the
+    // same way as every other Cloud API call. The worker's
+    // `authenticate()` requires BOTH headers — Authorization alone
+    // routes through as anonymous (which is why every telemetry row
+    // had user_id = NULL until this fix).
+    let auth_pair = _app
+        .try_state::<AuthState>()
+        .and_then(|s| s.active_token_and_provider());
 
     let endpoint = format!("{}/api/telemetry/heartbeat", API_BASE_URL);
     let client = match reqwest::Client::builder().timeout(HTTP_TIMEOUT).build() {
@@ -117,8 +124,10 @@ async fn flush_once(_app: &AppHandle, pool: &SqlitePool) {
     };
 
     let mut req = client.post(&endpoint).json(&payload);
-    if let Some(token) = bearer {
-        req = req.header("Authorization", format!("Bearer {}", token));
+    if let Some((token, provider)) = auth_pair {
+        req = req
+            .header("Authorization", format!("Bearer {}", token))
+            .header("X-Provider", provider);
     }
 
     match req.send().await {
@@ -151,14 +160,6 @@ async fn flush_once(_app: &AppHandle, pool: &SqlitePool) {
 async fn schedule_next(pool: &SqlitePool, delay_secs: i64) {
     let next_at = Utc::now().timestamp() + delay_secs;
     let _ = settings_repo::upsert(pool, SETTING_NEXT_AT, &next_at.to_string()).await;
-}
-
-async fn bearer_token(app: &AppHandle) -> Option<String> {
-    let auth = app.try_state::<AuthState>()?;
-    let snap = auth.snapshot();
-    // Prefer GitHub if present; fall back to Google id_token. Either
-    // is acceptable to the worker's `authenticate(request, env)`.
-    snap.github_token.clone().or(snap.google_id_token.clone())
 }
 
 // Rebuild a DrainResult from the bucketed payload — used when we need
