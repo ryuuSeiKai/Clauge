@@ -190,7 +190,7 @@ export const PROVIDERS: ProviderConfig[] = [
   },
   {
     providerId: 'gemini',
-    modelId: 'gemini-3.1-flash-lite-preview',
+    modelId: 'gemini-3.1-flash-lite',
     displayName: 'Gemini 3.1 Flash-Lite',
     providerLabel: 'Google Gemini',
     modelLabel: 'Gemini 3.1 Flash-Lite',

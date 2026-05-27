@@ -249,6 +249,29 @@ pub async fn stream_openai(
             log::error!("[AI OpenAI] Error {}: {}", status, truncate_str(&error_body, 500));
             let msg = match status {
                 401 => "Invalid API key".to_string(),
+                402 => {
+                    // Clauge AI returns:
+                    //   {"error":"INSUFFICIENT_CREDITS","message":"out of Clauge AI credits this cycle","retryable":false}
+                    // Other providers may return a generic OpenAI-shape body. Always
+                    // produce a message that contains the word "credits" so the
+                    // frontend error mapper can classify it without parsing JSON.
+                    let detail = serde_json::from_str::<serde_json::Value>(&error_body)
+                        .ok()
+                        .and_then(|v| {
+                            v["message"]
+                                .as_str()
+                                .or_else(|| v["error"]["message"].as_str())
+                                .map(|s| s.to_string())
+                        })
+                        .unwrap_or_default();
+                    if detail.is_empty() {
+                        "Out of credits — payment required".to_string()
+                    } else if detail.to_lowercase().contains("credits") {
+                        detail
+                    } else {
+                        format!("Out of credits — {}", detail)
+                    }
+                }
                 429 => {
                     let mut m = "Rate limited".to_string();
                     if let Some(secs) = retry_after {

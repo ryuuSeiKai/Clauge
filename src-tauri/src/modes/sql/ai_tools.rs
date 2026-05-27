@@ -18,10 +18,13 @@ enum SqlErrKind {
 
 fn classify_sql_error(raw: &str) -> SqlErrKind {
     let lower = raw.to_lowercase();
+    // Real transient signals only. "internal error" was previously here
+    // because D1's 7500 catch-all surfaced under that label — but most
+    // 7500s are permanent (unsupported SQL, CPU-budget exhaustion, etc.),
+    // and treating them as transient sent the AI into infinite retry
+    // loops on queries that would never succeed.
     let transient_signals = [
-        "retry in a moment",
         "try again",
-        "internal error",
         "timeout",
         "timed out",
         "deadlock detected",
@@ -145,12 +148,33 @@ async fn fetch_table_list(
     }
 }
 
+/// Defensive check for identifiers that must be interpolated rather than
+/// parameter-bound (e.g. PRAGMA arguments in SQLite/D1, identifiers in
+/// system.* catalog lookups in ClickHouse). Accepts a conservative
+/// alphanumeric + `_` + `.` (schema qualifier) + `$` (Postgres). Anything
+/// else is rejected outright. The caller still needs to format the
+/// identifier into the SQL string, but at least it can't smuggle in a
+/// statement terminator or an opening quote.
+pub(super) fn is_safe_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 128
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '$')
+}
+
 async fn fetch_columns_for_table(
     pool_entry: &crate::modes::sql::client::DatabasePool,
     database: &str,
     table: &str,
 ) -> Vec<String> {
     use crate::modes::sql::client::DatabasePool;
+    // Reject any table identifier that doesn't pass the conservative
+    // syntax check — PRAGMA arguments (SQLite/D1) and table-name
+    // interpolation (ClickHouse system.columns lookup) below can't use
+    // parameter binding, so this is the only line of defence.
+    if !is_safe_identifier(table) {
+        log::warn!("[ai_tools] fetch_columns_for_table: rejected unsafe identifier '{}'", table);
+        return Vec::new();
+    }
     match pool_entry {
         DatabasePool::Postgres(p) => {
             sqlx::query_scalar::<_, String>(

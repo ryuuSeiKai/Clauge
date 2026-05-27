@@ -376,6 +376,8 @@ pub fn run() {
             modes::sql::client::sql_disconnect_connection,
             modes::sql::client::sql_test_connection,
             modes::sql::client::sql_execute_query,
+            modes::sql::client::sql_execute_batch,
+            modes::sql::client::sql_current_schema,
             modes::sql::client::sql_list_databases,
             modes::sql::client::sql_create_database,
             modes::sql::client::sql_list_schemas,

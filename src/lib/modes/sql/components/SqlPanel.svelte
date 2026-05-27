@@ -17,6 +17,7 @@
     poolKey,
     connectionDatabases,
     databaseTables,
+    defaultSchemas,
     loadConnections,
     loadDatabaseList,
     loadTablesForDb,
@@ -27,13 +28,14 @@
     registerSqlEventListeners,
   } from '../stores';
   import { tabs, activeTabId, addTab } from '$lib/shared/stores/tabs';
-  import { sqlExecuteQuery, sqlDescribeTable } from '../commands';
+  import { sqlExecuteQuery, sqlExecuteBatch, sqlDescribeTable, sqlCurrentSchema } from '../commands';
   import type { TableInfo, SqlResultEntry, ColumnInfo, SqlQueryResult, Binding } from '../types';
   import { descriptorFor } from '../dialects';
   import { showToast } from '$lib/shared/primitives/toast';
   import { friendlyError } from '$lib/utils/errors';
   import { get } from 'svelte/store';
   import { splitSqlStatements } from '../utils/splitter';
+  import { translateMetaCommand } from '../utils/psqlMeta';
 
   // Component-local UI state
   let editorHeight = $state(45);
@@ -102,34 +104,66 @@
     return $databaseTables.get(key) ?? ([] as TableInfo[]);
   });
 
-  // Column autocomplete map: table → column names.
+  // Column autocomplete map: table → column names. Keyed by
+  // `schema.table` when the engine reports a schema (Postgres), or by
+  // bare table name otherwise. The editor's buildSchema() resolves both
+  // forms so the user can complete qualified and unqualified refs.
   let columnMap = $state<Record<string, string[]>>({});
   let columnMapKey = '';
+  let isSchemaLoading = $state(false);
 
   $effect(() => {
     const tables = tableList;
     const b = binding;
     if (!b || tables.length === 0) {
       columnMap = {};
+      isSchemaLoading = false;
       return;
     }
     const key = `${b.connectionId}:${b.database}`;
     if (key === columnMapKey) return;
     columnMapKey = key;
+    // Snapshot the key at fetch start. If the user switches bindings
+    // before this batch settles, we must NOT clobber the newer columnMap
+    // or prematurely clear isSchemaLoading — the newer effect run owns
+    // both pieces of state from the moment columnMapKey changed.
+    const requestKey = key;
 
     const fetchColumns = async () => {
+      isSchemaLoading = true;
       const map: Record<string, string[]> = {};
-      const batch = tables.slice(0, 50);
+      // Fetch column info for up to 200 tables. Tables beyond this still
+      // appear in the dropdown by name but won't have `tablename.`
+      // column completion until on-demand fetching ships. 200 covers
+      // almost every real database without making the initial load punitive.
+      const batch = tables.slice(0, 200);
       const results = await Promise.allSettled(
         batch.map(async (t) => {
-          const cols = await sqlDescribeTable(b.connectionId, b.database, t.name);
-          return { name: t.name, cols: cols.map((c: ColumnInfo) => c.name) };
+          const cols = await sqlDescribeTable(b.connectionId, b.database, t.name, t.schema);
+          // Use qualified key when schema is known so two tables of the
+          // same name in different schemas don't overwrite each other.
+          const cmKey = t.schema ? `${t.schema}.${t.name}` : t.name;
+          return { key: cmKey, cols: cols.map((c: ColumnInfo) => c.name) };
         }),
       );
-      for (const r of results) {
-        if (r.status === 'fulfilled') map[r.value.name] = r.value.cols;
+      // Bail if a newer fetch claimed columnMapKey while we were awaiting.
+      if (columnMapKey !== requestKey) return;
+      for (let i = 0; i < results.length; i++) {
+        const r = results[i];
+        if (r.status === 'fulfilled') {
+          map[r.value.key] = r.value.cols;
+        } else {
+          // Silent drops used to hide which table was failing and why,
+          // making "autocomplete doesn't work" untraceable. Surface to
+          // the console so a DevTools peek tells the story.
+          const t = batch[i];
+          const label = t.schema ? `${t.schema}.${t.name}` : t.name;
+          // eslint-disable-next-line no-console
+          console.warn(`[SQL autocomplete] describe failed for ${label}:`, r.reason);
+        }
       }
       columnMap = map;
+      isSchemaLoading = false;
     };
     fetchColumns();
   });
@@ -168,6 +202,21 @@
     const tableKey = `${b.connectionId}:${b.database}`;
     if (!$databaseTables.has(tableKey)) {
       loadTablesForDb(b.connectionId, b.database);
+    }
+    if (!$defaultSchemas.has(tableKey)) {
+      // Fire-and-forget: editor falls back to undefined if this fails,
+      // which CodeMirror handles as "no default schema hint".
+      sqlCurrentSchema(b.connectionId, b.database)
+        .then((s) => {
+          if (s) {
+            defaultSchemas.update((m) => {
+              const n = new Map(m);
+              n.set(tableKey, s);
+              return n;
+            });
+          }
+        })
+        .catch(() => { /* engine doesn't expose it — fine */ });
     }
   });
 
@@ -330,6 +379,48 @@
     return `${trimmed} LIMIT ${limit}`;
   }
 
+  /** Translate `\dt`, `.tables`, etc. into the equivalent SELECT before
+   *  the engine sees them. Returns the original query when there's no
+   *  meta-command to rewrite (or the driver doesn't support them). */
+  function rewriteMetaCommand(query: string): string {
+    const driver = boundConnection?.driver;
+    if (!driver) return query;
+    const rewritten = translateMetaCommand(query, driver);
+    return rewritten ?? query;
+  }
+
+  /** After a successful execution, if any of the statements were DDL
+   *  (CREATE / DROP / ALTER / RENAME / TRUNCATE), invalidate the table
+   *  cache so the next autocomplete reconfigure sees the new schema.
+   *  Cheap to call — no-ops when no DDL ran.
+   *
+   *  `target` MUST be the binding that was active when the query started
+   *  — not the reactive `binding`. Reading `binding` here would invalidate
+   *  the wrong tab's cache if the user switched tabs while the query was
+   *  awaiting on the server. Callers snapshot via `const execBinding =
+   *  binding` before the first await and pass that snapshot through. */
+  async function refreshSchemaIfDdl(
+    target: Binding,
+    items: (SqlQueryResult | null | undefined)[],
+  ) {
+    const hasDdl = items.some((r) => r && r.queryKind === 'ddl');
+    if (!hasDdl) return;
+    const cacheKey = `${target.connectionId}:${target.database}`;
+    databaseTables.update((m) => {
+      const n = new Map(m);
+      n.delete(cacheKey);
+      return n;
+    });
+    // Only clobber the local columnMap if it still belongs to the
+    // executed binding — otherwise the user has already moved on and
+    // we'd be wiping the new tab's autocomplete data.
+    if (columnMapKey === cacheKey) {
+      columnMap = {};
+      columnMapKey = '';
+    }
+    await loadTablesForDb(target.connectionId, target.database);
+  }
+
   function makeResultLabel(query: string): string {
     const trimmed = query.trim().replace(/\s+/g, ' ');
     const match = trimmed.match(/\b(?:FROM|INTO|UPDATE|TABLE|INDEX\s+(?:\w+\s+)?ON)\s+[`"']?(\w+)/i);
@@ -352,11 +443,17 @@
     }
     if (currentTabData?.inFlight) return; // structurally blocked, defensive
 
+    // Snapshot the binding before any await. Reactive `binding` can
+    // change mid-execute if the user switches tabs; we need to point
+    // results, schema invalidation, and the cancel handle at the
+    // binding that *started* the query.
+    const execBinding: Binding = binding;
+
     // Always re-check the pool before executing. ensureConnected is a
     // no-op when already connected. If the user clicks Run during the
     // connect handshake, this awaits the same in-flight Promise.
     try {
-      await ensureConnected(binding.connectionId, binding.database);
+      await ensureConnected(execBinding.connectionId, execBinding.database);
     } catch (e: any) {
       showToast(`Couldn't connect: ${friendlyError(e)}`, 'error');
       return;
@@ -376,9 +473,9 @@
 
     try {
       const result = await sqlExecuteQuery(
-        binding.connectionId,
-        binding.database,
-        applyRowLimit(q),
+        execBinding.connectionId,
+        execBinding.database,
+        applyRowLimit(rewriteMetaCommand(q)),
         queryId,
       );
       const entry: SqlResultEntry = { label, query: q, result, error: null, startedAt };
@@ -399,6 +496,7 @@
         inFlight: null,
       });
       showToast(`Query completed in ${result.durationMs}ms`, 'success');
+      void refreshSchemaIfDdl(execBinding, [result]);
     } catch (e: any) {
       const msg = e?.toString?.() ?? String(e);
       const entry: SqlResultEntry = { label, query: q, result: null, error: msg, startedAt };
@@ -429,8 +527,11 @@
     }
     if (currentTabData?.inFlight) return;
 
+    // Snapshot binding before any await — see refreshSchemaIfDdl docs.
+    const execBinding: Binding = binding;
+
     try {
-      await ensureConnected(binding.connectionId, binding.database);
+      await ensureConnected(execBinding.connectionId, execBinding.database);
     } catch (e: any) {
       showToast(`Couldn't connect: ${friendlyError(e)}`, 'error');
       return;
@@ -442,75 +543,92 @@
       query: q,
       result: null,
       error: null,
+      startedAt: Date.now(),
     }));
 
-    // Initial inFlight uses the first statement's subId — matching the
-    // id we'll send to Rust on the first iteration. Per-statement
-    // updates below keep inFlight.queryId aligned with whichever
-    // statement is currently running, so the Cancel button always
-    // targets the live InFlight entry in the Rust map (which is keyed
-    // by the subId, not by any batch-wide id).
-    const firstSubId = makeQueryId();
+    // One InFlight entry for the whole batch — the backend acquires one
+    // connection and one transaction (PG/MySQL/SQLite) and runs every
+    // statement on it. Cancellation mid-batch isn't supported in this
+    // path yet; users wanting per-statement cancel should execute
+    // statements singly.
+    const batchId = makeQueryId();
+    const batchStartedAt = Date.now();
     setSqlTabData(tabId, {
-      inFlight: { queryId: firstSubId, startedAt: Date.now() },
+      inFlight: { queryId: batchId, startedAt: batchStartedAt },
       result: null,
       error: null,
       results: entries,
       activeResultIdx: 0,
     });
 
-    let successCount = 0;
-    let errorCount = 0;
-    let cancelled = false;
-    for (let i = 0; i < queries.length; i++) {
-      const subId = i === 0 ? firstSubId : makeQueryId();
-      if (i > 0) {
-        setSqlTabData(tabId, { inFlight: { queryId: subId, startedAt: Date.now() } });
-      }
-      entries[i].startedAt = Date.now();
-      try {
-        const result = await sqlExecuteQuery(
-          binding.connectionId,
-          binding.database,
-          applyRowLimit(queries[i]),
-          subId,
-        );
-        entries[i].result = result;
-        successCount++;
-      } catch (e: any) {
-        const msg = e?.toString?.() ?? String(e);
-        entries[i].error = msg;
-        errorCount++;
-        // The Rust select! returns "Query cancelled" when the user
-        // hits Cancel mid-batch. Stop the loop so the next statement
-        // doesn't kick off automatically against the user's intent.
-        if (/cancelled/i.test(msg)) {
-          cancelled = true;
-          break;
-        }
-      }
-      setSqlTabData(tabId, { results: [...entries], activeResultIdx: i });
+    const driver = boundConnection?.driver ?? '';
+    // PG/MySQL/SQLite get true BEGIN/COMMIT/ROLLBACK. CH and D1 fall
+    // back to sequential auto-commits in the backend — same atomicity
+    // story as before, just consolidated to one Tauri call.
+    const isTransactional = ['postgresql', 'mysql', 'sqlite'].includes(driver);
+
+    const prepared = queries.map((q) => applyRowLimit(rewriteMetaCommand(q)));
+
+    let results: SqlQueryResult[] = [];
+    let batchError: string | null = null;
+    try {
+      results = await sqlExecuteBatch(execBinding.connectionId, execBinding.database, prepared);
+    } catch (e: any) {
+      batchError = e?.toString?.() ?? String(e);
     }
 
-    const last = entries[entries.length - 1];
+    if (batchError) {
+      // The backend's error message already names the failing statement
+      // index and (for transactional engines) confirms rollback. We
+      // surface it on the first entry without a result so the user can
+      // see what hit.
+      const firstUnsuccessful = results.length;
+      for (let i = 0; i < entries.length; i++) {
+        if (i < results.length) {
+          entries[i].result = results[i];
+        } else if (i === firstUnsuccessful) {
+          entries[i].error = batchError;
+        }
+      }
+      setSqlTabData(tabId, {
+        inFlight: null,
+        result: entries[entries.length - 1]?.result ?? null,
+        error: batchError,
+        results: entries,
+        activeResultIdx: firstUnsuccessful,
+      });
+      if (isTransactional) {
+        showToast(
+          `Batch rolled back — ${queries.length - firstUnsuccessful} statements failed (no changes persisted)`,
+          'error',
+        );
+      } else {
+        showToast(
+          `Batch failed at statement ${firstUnsuccessful + 1} — ${firstUnsuccessful} statement(s) already persisted (engine has no rollback)`,
+          'error',
+        );
+      }
+      return;
+    }
+
+    // Full success.
+    for (let i = 0; i < entries.length; i++) {
+      entries[i].result = results[i] ?? null;
+    }
     setSqlTabData(tabId, {
       inFlight: null,
-      result: last?.result ?? null,
-      error: last?.error ?? null,
+      result: entries[entries.length - 1]?.result ?? null,
+      error: null,
       results: entries,
       activeResultIdx: entries.length - 1,
     });
-
-    if (cancelled) {
-      showToast(`Cancelled — ${successCount} ran before stop`, 'info');
-    } else if (errorCount === 0) {
-      showToast(`${successCount} queries completed`, 'success');
-    } else {
-      showToast(
-        `${successCount} succeeded, ${errorCount} failed`,
-        errorCount === queries.length ? 'error' : 'info',
-      );
-    }
+    showToast(
+      isTransactional
+        ? `${queries.length} statements committed atomically`
+        : `${queries.length} statements completed`,
+      'success',
+    );
+    void refreshSchemaIfDdl(execBinding, results);
   }
 
   async function handleCancel() {
@@ -721,6 +839,8 @@
           query={currentQuery}
           tables={tableList}
           {columnMap}
+          schemaLoading={isSchemaLoading}
+          defaultSchema={binding ? $defaultSchemas.get(`${binding.connectionId}:${binding.database}`) : undefined}
           disabled={!!inFlight || isConnecting}
           onexecute={handleExecute}
           onexecutemulti={handleExecuteMulti}

@@ -41,12 +41,32 @@ export async function sqlListDatabases(connId: string, database: string): Promis
   return invoke('sql_list_databases', { connId, database });
 }
 
+/** Run all statements inside a single transaction (PG/MySQL/SQLite). On
+ *  ClickHouse and D1 they run sequentially with no rollback — each
+ *  driver's batch function surfaces that in the error message if anything
+ *  fails. Returns one SqlQueryResult per statement on success. */
+export async function sqlExecuteBatch(
+  connId: string,
+  database: string,
+  statements: string[],
+): Promise<SqlQueryResult[]> {
+  return invoke('sql_execute_batch', { connId, database, statements });
+}
+
 export async function sqlCreateDatabase(connId: string, database: string, name: string): Promise<void> {
   return invoke('sql_create_database', { connId, database, name });
 }
 
 export async function sqlListSchemas(connId: string, database: string): Promise<string[]> {
   return invoke('sql_list_schemas', { connId, database });
+}
+
+/** Return the resolved default schema (first writable entry in Postgres's
+ *  search_path, or null for engines without schemas). Used by the editor
+ *  to make unqualified completion work for connections whose tables
+ *  don't live in `public`. */
+export async function sqlCurrentSchema(connId: string, database: string): Promise<string | null> {
+  return invoke('sql_current_schema', { connId, database });
 }
 
 export async function sqlListTables(

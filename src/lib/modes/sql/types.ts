@@ -78,6 +78,11 @@ export interface TableInfo {
   name: string;
   tableType: string;
   rowCount: number;
+  /** Schema namespace this table lives in. Postgres only — undefined for
+   *  MySQL/SQLite/ClickHouse/D1. When set, `buildSchema()` emits both
+   *  `tableName` and `schema.tableName` keys so the editor can complete
+   *  qualified references like `analytics.events.id`. */
+  schema?: string;
 }
 
 export interface ColumnInfo {

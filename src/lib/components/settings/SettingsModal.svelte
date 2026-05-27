@@ -141,6 +141,13 @@
         else if (key === "appearance") activeTab = "appearance";
         else if (key === "shortcuts") activeTab = "shortcuts";
         else if (key === "ai") activeTab = "ai";
+        else if (key === "ai:byok") {
+            activeTab = "ai";
+            aiTopTab = "byok";
+        } else if (key === "ai:clauge") {
+            activeTab = "ai";
+            aiTopTab = "clauge";
+        }
         else if (key === "rest") activeTab = "rest";
         else if (key === "agent") activeTab = "agent";
         else if (key === "agent:usage") {
@@ -1035,7 +1042,7 @@
             "gpt-4.1-mini": "GPT-4.1 Mini",
             "nvidia/nemotron-3-super-120b-a12b": "Nemotron 3 Super 120B",
             "meta-llama/llama-3.3-70b-instruct:free": "Llama 3.3 70B",
-            "gemini-3.1-flash-lite-preview": "Gemini 3.1 Flash-Lite",
+            "gemini-3.1-flash-lite": "Gemini 3.1 Flash-Lite",
             "qwen/qwen3-32b": "Qwen3 32B",
         };
         return names[model] || model;
@@ -5382,7 +5389,7 @@
                                     </a>
                                     <a
                                         class="about-link-btn"
-                                        href="https://github.com/ansxuman/Clauge/issues/new"
+                                        href="https://github.com/ansxuman/Clauge/issues/new/choose"
                                         target="_blank"
                                         rel="noopener"
                                         title="Report an Issue"
@@ -5438,6 +5445,38 @@
                                             /></svg
                                         >
                                         <span>Website</span>
+                                    </a>
+                                    <a
+                                        class="about-link-btn"
+                                        href="https://x.com/clauge_in"
+                                        target="_blank"
+                                        rel="noopener"
+                                        title="X / Twitter"
+                                    >
+                                        <svg viewBox="0 0 24 24"
+                                            ><path
+                                                d="M4 4l7.5 9.5L4.5 20H7l5.7-6.2L17 20h3l-7.8-9.9L19.5 4H17l-5.2 5.7L8 4H4z"
+                                            /></svg
+                                        >
+                                        <span>X / Twitter</span>
+                                    </a>
+                                    <a
+                                        class="about-link-btn"
+                                        href="mailto:support@clauge.in"
+                                        title="Email Support"
+                                    >
+                                        <svg viewBox="0 0 24 24"
+                                            ><rect
+                                                x="3"
+                                                y="5"
+                                                width="18"
+                                                height="14"
+                                                rx="2"
+                                            /><path
+                                                d="M3 7l9 6 9-6"
+                                            /></svg
+                                        >
+                                        <span>Email</span>
                                     </a>
                                 </div>
                             </div>

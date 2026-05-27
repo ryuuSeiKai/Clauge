@@ -52,7 +52,7 @@ export interface AIMessage {
   actions?: AIActionBlock[];
   toolIndicator?: string;
   isStreaming?: boolean;
-  error?: { type: 'rate_limit' | 'auth' | 'cloud_auth' | 'generic'; message: string };
+  error?: { type: 'rate_limit' | 'auth' | 'cloud_auth' | 'credits' | 'generic'; message: string; provider?: string };
   timestamp: number;
 }
 

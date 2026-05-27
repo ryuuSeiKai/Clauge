@@ -272,13 +272,22 @@ impl ClickhouseClient {
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
             let body = response.text().await.unwrap_or_default();
-            // Prefer our hand-written message for known codes; fall back to
-            // a trimmed version of ClickHouse's verbose body otherwise.
+            // Always preserve the raw driver message. A hand-written label
+            // helps classify (auth / memory / timeout) but should never
+            // replace the underlying parser/runtime detail — that's what
+            // tells the user how to fix their query. Prepend `(line N,
+            // col M)` when the body contains it, mirroring the Postgres
+            // and MySQL error shapes.
+            let cleaned = clean_clickhouse_error_body(&body);
+            let position_prefix = super::client::enrich_clickhouse_err(&body)
+                .map(|(l, c)| format!("(line {}, col {}) ", l, c))
+                .unwrap_or_default();
             return Err(match code.as_deref().and_then(humanize_clickhouse_code) {
-                Some(msg) => msg.to_string(),
-                None => match code {
-                    Some(c) => format!("ClickHouse error (code {}): {}", c, clean_clickhouse_error_body(&body)),
-                    None => format!("ClickHouse error ({}): {}", status, clean_clickhouse_error_body(&body)),
+                Some(label) if cleaned.is_empty() => label.to_string(),
+                Some(label) => format!("{}{} — {}", position_prefix, label, cleaned),
+                None => match &code {
+                    Some(c) => format!("{}ClickHouse error (code {}): {}", position_prefix, c, cleaned),
+                    None => format!("{}ClickHouse error ({}): {}", position_prefix, status, cleaned),
                 },
             });
         }

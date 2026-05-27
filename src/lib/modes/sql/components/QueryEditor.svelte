@@ -8,10 +8,12 @@
   import { syntaxHighlighting } from '@codemirror/language';
   import { defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
   import { history } from '@codemirror/commands';
+  import { search, searchKeymap } from '@codemirror/search';
+  import { format as formatSql } from 'sql-formatter';
   import { activeConnection } from '../stores';
   import type { TableInfo } from '../types';
   import { parserProfileFor } from '../dialects';
-  import { splitSqlStatements } from '../utils/splitter';
+  import { splitSqlStatements, splitSqlStatementsWithPositions } from '../utils/splitter';
   import { showToast } from '$lib/shared/primitives/toast';
   import { mod } from '$lib/utils/platform';
 
@@ -19,6 +21,14 @@
     query: string;
     tables?: TableInfo[];
     columnMap?: Record<string, string[]>;
+    /** True while column metadata is being fetched in the background.
+     *  Surfaces a small "Loading schema…" hint so users know that empty
+     *  autocomplete suggestions are temporary, not broken. */
+    schemaLoading?: boolean;
+    /** Resolved default schema for unqualified table completion. Comes
+     *  from `current_schema()` on Postgres connections; undefined for
+     *  engines that have no schema concept. */
+    defaultSchema?: string;
     /** True while a query is in flight OR while the pool is connecting.
      *  Cmd/Ctrl+Enter no-ops; the Run button is already disabled in the
      *  parent. Prevents queue-piling on the same tab. */
@@ -28,7 +38,7 @@
     onexecutemulti?: (queries: string[]) => void;
   }
 
-  let { query, tables = [], columnMap = {}, disabled = false, onquerychange, onexecute, onexecutemulti }: Props = $props();
+  let { query, tables = [], columnMap = {}, schemaLoading = false, defaultSchema, disabled = false, onquerychange, onexecute, onexecutemulti }: Props = $props();
 
   let editorContainer: HTMLDivElement | undefined = $state();
   let editorView: EditorView | undefined;
@@ -44,29 +54,98 @@
     SQLite,
   };
 
+  // sql-formatter dialect identifiers. Keep narrower than the CodeMirror
+  // dialect list — sql-formatter has stricter parsing so anything
+  // unknown falls back to the generic 'sql' so we don't blow up on
+  // ClickHouse / D1 queries.
+  const SQL_FORMATTER_DIALECTS: Record<string, 'postgresql' | 'mysql' | 'sqlite' | 'sql'> = {
+    PostgreSQL: 'postgresql',
+    MySQL: 'mysql',
+    SQLite: 'sqlite',
+  };
+
   const dialect = $derived(
     CM_DIALECTS[parserProfileFor($activeConnection?.driver ?? '')] ?? PostgreSQL
   );
 
-  function buildSchema() {
+  // CodeMirror's SQLNamespace is a *nested* shape — keys are single
+  // name segments and CodeMirror does NOT split them on `.`. Writing
+  // `{ "public.users": [...] }` would register a literal table named
+  // "public.users", not schema "public" containing table "users".
+  //
+  // For Postgres (rows carry `schema`), produce a nested map:
+  //   { public: { users: ['id', 'name'] }, analytics: { events: [...] } }
+  // and rely on `defaultSchema: 'public'` (passed in the sql() config)
+  // so unqualified `users` completes from the default schema for free.
+  //
+  // For engines without schemas (MySQL/SQLite/ClickHouse/D1) the output
+  // is flat: `{ tableName: columns }` — the previous behaviour.
+  function buildSchema(): Record<string, any> {
     if (!tables.length) return {};
-    return tables.reduce((acc, t) => {
-      acc[t.name] = columnMap[t.name] ?? [];
-      return acc;
-    }, {} as Record<string, string[]>);
+
+    const hasSchemas = tables.some((t) => !!t.schema);
+    if (!hasSchemas) {
+      const out: Record<string, string[]> = {};
+      for (const t of tables) {
+        if (!t.name) continue;
+        out[t.name] = columnMap[t.name] ?? [];
+      }
+      return out;
+    }
+
+    // Schema-aware (Postgres). Build nested namespaces. If a table has
+    // no schema field (shouldn't happen on PG but be defensive), park
+    // it under a `_unschemed` bucket rather than dropping it.
+    const out: Record<string, Record<string, string[]> | string[]> = {};
+    for (const t of tables) {
+      if (!t.name) continue;
+      const schemaName = t.schema || '_unschemed';
+      const colKey = t.schema ? `${t.schema}.${t.name}` : t.name;
+      const cols = columnMap[colKey] ?? columnMap[t.name] ?? [];
+
+      let bucket = out[schemaName];
+      if (!bucket || Array.isArray(bucket)) {
+        bucket = {};
+        out[schemaName] = bucket;
+      }
+      (bucket as Record<string, string[]>)[t.name] = cols;
+    }
+
+    return out;
   }
 
-  // Reconfigure SQL extension when tables, columns, or dialect changes
+  // Resolved default schema. Prefer what the parent passed (computed
+  // from Postgres `current_schema()` on connect — handles connections
+  // whose first writable schema isn't `public`). Fall back to `public`
+  // for Postgres if the parent hasn't resolved one yet, and undefined
+  // for engines that have no schema concept.
+  const defaultSchemaForDialect = $derived(
+    defaultSchema ??
+    (parserProfileFor($activeConnection?.driver ?? '') === 'PostgreSQL' ? 'public' : undefined)
+  );
+
+  // Reconfigure SQL extension when tables, columns, or dialect changes.
+  //
+  // CRITICAL: read every reactive dep BEFORE the editorView guard.
+  // Svelte 5 tracks only reads that happen during the synchronous effect
+  // run. On first mount the effect fires *before* onMount sets
+  // editorView, so if we read the deps inside `if (editorView)` they are
+  // never tracked and the effect never re-fires when tables/columnMap
+  // arrive — which is why "tables don't appear in autocomplete" was
+  // happening for everyone, on every engine.
   $effect(() => {
-    if (editorView) {
-      const _cm = columnMap; // track dependency
-      const schema = buildSchema();
-      editorView.dispatch({
-        effects: sqlCompartment.reconfigure(
-          sql({ dialect, schema, upperCaseKeywords: true })
-        ),
-      });
-    }
+    const tablesDep = tables;
+    const columnsDep = columnMap;
+    const dialectDep = dialect;
+    const defaultSchemaDep = defaultSchemaForDialect;
+    void tablesDep; void columnsDep;
+    if (!editorView) return;
+    const schema = buildSchema();
+    editorView.dispatch({
+      effects: sqlCompartment.reconfigure(
+        sql({ dialect: dialectDep, schema, defaultSchema: defaultSchemaDep, upperCaseKeywords: true })
+      ),
+    });
   });
 
   const editorTheme = EditorView.theme({
@@ -91,6 +170,92 @@
     '.cm-scroller::-webkit-scrollbar': { width: '4px' },
     '.cm-scroller::-webkit-scrollbar-thumb': { background: 'var(--b1)', borderRadius: '2px' },
     '.cm-placeholder': { color: 'var(--t4)' },
+    // --- Find/Replace panel (@codemirror/search) ---
+    // The default panel ships with light-mode gray styling that
+    // clashes against the dark editor. Theme it with the app's tokens
+    // so it feels like part of Clauge, not a foreign widget.
+    '.cm-panels': {
+      backgroundColor: 'var(--n2)',
+      color: 'var(--t1)',
+      borderTop: '1px solid var(--b1)',
+      borderBottom: '1px solid var(--b1)',
+      fontFamily: 'var(--ui)',
+    },
+    '.cm-panels.cm-panels-top': { borderBottom: '1px solid var(--b1)', borderTop: 'none' },
+    '.cm-panels.cm-panels-bottom': { borderTop: '1px solid var(--b1)', borderBottom: 'none' },
+    '.cm-search': {
+      padding: '6px 8px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px',
+      flexWrap: 'wrap',
+      fontSize: '12px',
+    },
+    '.cm-search label': {
+      display: 'inline-flex',
+      alignItems: 'center',
+      gap: '4px',
+      color: 'var(--t3)',
+      fontSize: '11.5px',
+      whiteSpace: 'nowrap',
+    },
+    '.cm-search input[type="checkbox"]': {
+      accentColor: 'var(--acc)',
+      margin: '0',
+    },
+    '.cm-textfield': {
+      backgroundColor: 'var(--surface, #111)',
+      color: 'var(--t1)',
+      border: '1px solid var(--b1)',
+      borderRadius: '4px',
+      padding: '4px 8px',
+      fontSize: '12px',
+      fontFamily: 'var(--mono)',
+      minWidth: '180px',
+      outline: 'none',
+    },
+    '.cm-textfield:focus': {
+      borderColor: 'var(--acc)',
+      boxShadow: '0 0 0 1px var(--acc)',
+    },
+    '.cm-button': {
+      backgroundColor: 'var(--surface, #111)',
+      color: 'var(--t2)',
+      border: '1px solid var(--b1)',
+      borderRadius: '4px',
+      padding: '3px 10px',
+      fontSize: '11.5px',
+      fontFamily: 'var(--ui)',
+      cursor: 'pointer',
+      backgroundImage: 'none',
+      textShadow: 'none',
+    },
+    '.cm-button:hover': {
+      backgroundColor: 'var(--surface-hover, #1a1a1a)',
+      color: 'var(--t1)',
+      borderColor: 'var(--b2, #333)',
+    },
+    '.cm-button:active': {
+      backgroundColor: 'var(--n3, #0c0c0c)',
+    },
+    '.cm-button[name="close"], button[name="close"].cm-panel-close': {
+      backgroundColor: 'transparent',
+      border: 'none',
+      color: 'var(--t3)',
+      fontSize: '14px',
+      padding: '2px 6px',
+      marginLeft: 'auto',
+    },
+    '.cm-button[name="close"]:hover': { color: 'var(--t1)' },
+    // Match highlight inside the editor body
+    '.cm-searchMatch': {
+      backgroundColor: 'rgba(245,166,35,0.25)',
+      outline: '1px solid rgba(245,166,35,0.5)',
+    },
+    '.cm-searchMatch-selected': {
+      backgroundColor: 'rgba(245,166,35,0.5)',
+      outline: '1px solid rgba(245,166,35,0.8)',
+    },
   });
 
   function createEditor(container: HTMLDivElement, initialDoc: string) {
@@ -108,12 +273,29 @@
               executeFromCursor(view);
               return true;
             }, preventDefault: true },
+          { key: 'Mod-Shift-f', run: formatBuffer, preventDefault: true },
           ...defaultKeymap,
           ...historyKeymap,
+          ...searchKeymap,
           indentWithTab,
         ]),
-        sqlCompartment.of(sql({ dialect: PostgreSQL, schema: buildSchema(), upperCaseKeywords: true })),
-        autocompletion({ activateOnTyping: true }),
+        // Initial config uses the real dialect + schema available at
+        // mount. The effect above will reconfigure once the async
+        // table/column fetches complete; this just avoids starting with
+        // the wrong dialect's keywords before that catches up.
+        sqlCompartment.of(sql({
+          dialect,
+          schema: buildSchema(),
+          defaultSchema: defaultSchemaForDialect,
+          upperCaseKeywords: true,
+        })),
+        // Cap the autocomplete dropdown — on a database with hundreds of
+        // tables the default unlimited list buries the relevant matches
+        // under a sea of SQL keywords and unrelated identifiers.
+        autocompletion({ activateOnTyping: true, maxRenderedOptions: 25 }),
+        // Find/Replace panel: Cmd/Ctrl+F to open, Cmd/Ctrl+G next,
+        // Shift+Cmd/Ctrl+G prev, Cmd/Ctrl+H or Alt+Cmd/Ctrl+F for replace.
+        search({ top: true }),
         syntaxHighlighting(oneDarkHighlightStyle),
         editorTheme,
         cmPlaceholder(`Write your SQL query here -- ${mod()}+Enter to execute`),
@@ -163,6 +345,35 @@
     return text.trim().length > 0;
   }
 
+  /** Reformat the entire buffer (or the current selection if one
+   *  exists) using sql-formatter, with dialect picked from the active
+   *  connection. Bound to Cmd/Ctrl+Shift+F. */
+  function formatBuffer(view: EditorView): boolean {
+    const profile = parserProfileFor($activeConnection?.driver ?? '');
+    const language = SQL_FORMATTER_DIALECTS[profile] ?? 'sql';
+    const sel = view.state.selection.main;
+    const source = sel.empty
+      ? view.state.doc.toString()
+      : view.state.sliceDoc(sel.from, sel.to);
+    if (!source.trim()) return true;
+    try {
+      const formatted = formatSql(source, { language, keywordCase: 'upper' });
+      if (formatted === source) return true;
+      if (sel.empty) {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: formatted },
+        });
+      } else {
+        view.dispatch({
+          changes: { from: sel.from, to: sel.to, insert: formatted },
+        });
+      }
+    } catch (e: any) {
+      showToast(`Format failed: ${e?.message ?? String(e)}`, 'error');
+    }
+    return true;
+  }
+
   function executeFromCursor(view: EditorView) {
     const sel = view.state.selection.main;
 
@@ -183,22 +394,27 @@
       return;
     }
 
-    // No selection — find the single statement at cursor position
+    // No selection — find the single statement at the cursor.
+    // Uses the proper splitter that respects strings, comments, and
+    // dollar-quoting; the old naive `split(';')` was broken whenever a
+    // statement contained a `;` inside a literal or comment.
     const fullText = view.state.doc.toString();
     const cursorPos = sel.head;
-    let start = 0;
-    const statements: { from: number; to: number; text: string }[] = [];
-    const parts = fullText.split(';');
-    for (const part of parts) {
-      const end = start + part.length;
-      const trimmed = part.trim();
-      if (trimmed) {
-        statements.push({ from: start, to: end, text: trimmed });
+    const statements = splitSqlStatementsWithPositions(fullText);
+    if (statements.length === 0) return;
+
+    // Primary match: cursor inside [from, to+1] (the +1 lets the cursor
+    // sit right after the trailing `;`).
+    let stmt = statements.find(s => cursorPos >= s.from && cursorPos <= s.to + 1);
+
+    // Fallback for cursor at end-of-buffer or in trailing whitespace
+    // after the final `;` — execute the last non-empty statement.
+    if (!stmt) {
+      for (let i = statements.length - 1; i >= 0; i--) {
+        if (statements[i].to < cursorPos) { stmt = statements[i]; break; }
       }
-      start = end + 1;
     }
 
-    const stmt = statements.find(s => cursorPos >= s.from && cursorPos <= s.to + 1);
     if (stmt && isExecutableStatement(stmt.text)) {
       onexecute?.(stmt.text);
     }
@@ -224,6 +440,12 @@
 
 <div class="query-editor">
   <div class="qe-editor" bind:this={editorContainer}></div>
+  {#if schemaLoading}
+    <div class="qe-schema-loading" title="Fetching column metadata for autocomplete. Suggestions improve as this completes.">
+      <span class="qe-spinner"></span>
+      <span>Loading schema for autocomplete…</span>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -232,6 +454,7 @@
     flex-direction: column;
     flex: 1;
     overflow: hidden;
+    position: relative;
   }
   .qe-editor {
     flex: 1;
@@ -240,5 +463,33 @@
   }
   .qe-editor :global(.cm-editor) {
     height: 100%;
+  }
+  .qe-schema-loading {
+    position: absolute;
+    bottom: 6px;
+    right: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--surface, #1a1a1a) 85%, transparent);
+    border: 1px solid var(--b1, #2a2a2a);
+    color: var(--t3, #8a8a8a);
+    font-family: var(--ui);
+    font-size: 10.5px;
+    pointer-events: none;
+    user-select: none;
+  }
+  .qe-spinner {
+    width: 9px;
+    height: 9px;
+    border: 1.5px solid var(--b1, #2a2a2a);
+    border-top-color: var(--acc, #7c5cf8);
+    border-radius: 50%;
+    animation: qe-spin 0.8s linear infinite;
+  }
+  @keyframes qe-spin {
+    to { transform: rotate(360deg); }
   }
 </style>

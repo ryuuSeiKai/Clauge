@@ -6,14 +6,21 @@ labels: enhancement
 assignees: ansxuman
 ---
 
-## Problem Description
-A clear description of what problem this feature would solve.
+## Pre-flight
+- [ ] I searched [existing issues](https://github.com/ansxuman/Clauge/issues?q=is%3Aissue) and didn't find a duplicate request
+
+## Target Mode / Area
+<!-- Which part of Clauge does this touch? Delete the ones that don't apply. -->
+Agent · Workspace · REST · SQL · NoSQL · SSH · Explorer · Settings · MCP · Sync · Cross-cutting · Other
+
+## Problem
+What problem are you trying to solve? Why does the current behavior fall short?
 
 ## Proposed Solution
-A clear description of what you'd like to happen.
+What would you like Clauge to do? Be concrete — mockups, command names, settings, API shapes all help.
 
-## Alternative Solutions
-Any alternative solutions or features you've considered.
+## Alternatives Considered
+Other approaches you thought about, and why the proposed solution is better.
 
 ## Additional Context
-Add any mockups, screenshots, or other context about the feature request.
+Screenshots, references to similar features in other tools, links to related discussions.

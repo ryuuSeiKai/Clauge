@@ -233,7 +233,7 @@ const REGISTRY: &[ProviderConfig] = &[
     },
     ProviderConfig {
         provider_id: ProviderId::Gemini,
-        model_id: "gemini-3.1-flash-lite-preview",
+        model_id: "gemini-3.1-flash-lite",
         display_name: "Gemini 3.1 Flash-Lite",
         api_url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
         api_kind: ApiKind::OpenAICompat,

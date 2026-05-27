@@ -83,6 +83,83 @@ pub fn classify_query(q: &str) -> QueryKind {
     }
 }
 
+/// Convert a 1-based character offset (Postgres' position semantics) into a
+/// `(line, column)` pair against the original query. Returns `None` if the
+/// offset is out of range. Both line and column are 1-based.
+fn offset_to_line_col(text: &str, offset_chars_1based: usize) -> Option<(u32, u32)> {
+    if offset_chars_1based == 0 {
+        return None;
+    }
+    let target = offset_chars_1based - 1;
+    let mut line: u32 = 1;
+    let mut col: u32 = 1;
+    for (i, ch) in text.chars().enumerate() {
+        if i == target {
+            return Some((line, col));
+        }
+        if ch == '\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+    }
+    None
+}
+
+/// Best-effort enrichment: when sqlx gives us a Postgres database error with a
+/// `position`, prepend `(line N, col M)` so the user can find the failing
+/// token in the editor. Falls through to the default `Display` for every other
+/// error shape — MySQL/SQLite don't expose position info structurally.
+fn enrich_sqlx_err(err: &sqlx::Error, query: &str) -> String {
+    if let sqlx::Error::Database(db) = err {
+        if let Some(pg) = db.try_downcast_ref::<sqlx::postgres::PgDatabaseError>() {
+            if let Some(sqlx::postgres::PgErrorPosition::Original(offset)) = pg.position() {
+                if let Some((line, col)) = offset_to_line_col(query, offset) {
+                    return format!("(line {}, col {}) {}", line, col, db.message());
+                }
+            }
+        }
+    }
+    err.to_string()
+}
+
+/// MySQL syntax errors include `at line N` in the server message. sqlx
+/// doesn't expose this structurally, so we lift it out of the text and
+/// prepend the same `(line N)` prefix Postgres uses, for consistent UX
+/// across engines.
+fn enrich_mysql_err(err: &sqlx::Error, _query: &str) -> String {
+    let msg = err.to_string();
+    if let Some(idx) = msg.find(" at line ") {
+        let after = &msg[idx + " at line ".len()..];
+        let end = after
+            .find(|c: char| !c.is_ascii_digit())
+            .unwrap_or(after.len());
+        if let Ok(line) = after[..end].parse::<u32>() {
+            return format!("(line {}) {}", line, msg);
+        }
+    }
+    msg
+}
+
+/// ClickHouse errors often include `(line N, col M)` in the verbose
+/// `DB::Exception` body. The `clean_clickhouse_error_body` helper trims
+/// to the first sentence and usually preserves that info, but when we
+/// want to surface it explicitly we extract and prepend it.
+pub(super) fn enrich_clickhouse_err(body: &str) -> Option<(u32, u32)> {
+    let idx = body.find("(line ")?;
+    let after = &body[idx + "(line ".len()..];
+    let line_end = after.find(|c: char| !c.is_ascii_digit())?;
+    let line = after[..line_end].parse::<u32>().ok()?;
+    let rest = &after[line_end..];
+    let col_marker = ", col ";
+    let col_idx = rest.find(col_marker)?;
+    let col_after = &rest[col_idx + col_marker.len()..];
+    let col_end = col_after.find(|c: char| !c.is_ascii_digit())?;
+    let col = col_after[..col_end].parse::<u32>().ok()?;
+    Some((line, col))
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SqlQueryResult {
@@ -99,6 +176,14 @@ pub struct TableInfo {
     pub name: String,
     pub table_type: String,
     pub row_count: Option<i64>,
+    /// Schema namespace this table lives in (Postgres only — None for
+    /// MySQL/SQLite/ClickHouse/D1, which collapse "database" and "schema"
+    /// into a single namespace). When `sql_list_tables` is called with no
+    /// schema for Postgres, the response now spans every user schema and
+    /// each row's `schema` field carries its origin so the frontend can
+    /// build qualified autocomplete keys.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub schema: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1055,7 +1140,7 @@ async fn run_query_pg(
     let mut affected: u64 = 0;
     {
         let mut stream = sqlx::query(query).fetch_many(&mut **conn);
-        while let Some(step) = stream.try_next().await.map_err(|e| e.to_string())? {
+        while let Some(step) = stream.try_next().await.map_err(|e| enrich_sqlx_err(&e, query))? {
             match step {
                 Either::Left(qr) => affected += qr.rows_affected(),
                 Either::Right(row) => {
@@ -1095,7 +1180,7 @@ async fn run_query_mysql(
     let mut affected: u64 = 0;
     {
         let mut stream = sqlx::query(query).fetch_many(&mut **conn);
-        while let Some(step) = stream.try_next().await.map_err(|e| e.to_string())? {
+        while let Some(step) = stream.try_next().await.map_err(|e| enrich_mysql_err(&e, query))? {
             match step {
                 Either::Left(qr) => affected += qr.rows_affected(),
                 Either::Right(row) => {
@@ -1202,6 +1287,310 @@ pub async fn sql_execute_query(
         }
         Err(e) => Err(e),
     }
+}
+
+/// Return the resolved default schema for the active session, i.e. the
+/// first writable schema in Postgres's `search_path`. The editor uses
+/// this as the `defaultSchema` hint for unqualified table completion —
+/// hardcoding `public` was wrong for users whose tables live in `app`,
+/// `tenant_*`, etc. Returns `None` for engines without a schema concept.
+#[tauri::command]
+pub async fn sql_current_schema(
+    manager: State<'_, Arc<SqlConnectionManager>>,
+    app_pool: State<'_, SqlitePool>,
+    conn_id: String,
+    database: String,
+) -> Result<Option<String>, String> {
+    ensure_pool_inner(manager.inner(), app_pool.inner(), &conn_id, &database).await?;
+    let key = pool_key(&conn_id, &database);
+    // Clone the pool inside the lock scope and drop the lock before
+    // awaiting any DB roundtrip. Holding the shared connections mutex
+    // across `fetch_one(...).await` would serialise unrelated pool
+    // operations on the same manager for the duration of the query.
+    let pool = {
+        let connections = manager.connections.lock().await;
+        connections
+            .get(&key)
+            .cloned()
+            .ok_or_else(|| "Connection not found".to_string())?
+    };
+    match pool {
+        DatabasePool::Postgres(p) => {
+            let row: (Option<String>,) = sqlx::query_as("SELECT current_schema()::text")
+                .fetch_one(&p)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok(row.0)
+        }
+        _ => Ok(None),
+    }
+}
+
+/// Run all `statements` inside a single transaction on PG/MySQL/SQLite.
+/// On the first failure, the transaction is rolled back and the error is
+/// returned with statement number for context. For ClickHouse and D1
+/// (which have no real transactions), the statements run sequentially as
+/// independent auto-commits and the function bails on the first failure
+/// — earlier successes remain persisted.
+#[tauri::command]
+pub async fn sql_execute_batch(
+    manager: State<'_, Arc<SqlConnectionManager>>,
+    app_pool: State<'_, SqlitePool>,
+    conn_id: String,
+    database: String,
+    statements: Vec<String>,
+) -> Result<Vec<SqlQueryResult>, String> {
+    if statements.is_empty() {
+        return Ok(vec![]);
+    }
+    crate::telemetry::bump("sql.execute_batch");
+    let key = pool_key(&conn_id, &database);
+    ensure_pool_inner(manager.inner(), app_pool.inner(), &conn_id, &database).await?;
+
+    // Whole-batch concurrency permit. Same anti-spam rule as single-execute.
+    let sem = manager.permit_for(&key).await;
+    let _permit = sem
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| "Connection busy — wait for a query to finish or cancel one".to_string())?;
+
+    let pool = {
+        let conns = manager.connections.lock().await;
+        conns
+            .get(&key)
+            .ok_or_else(|| "Connection not found".to_string())?
+            .clone()
+    };
+
+    match pool {
+        DatabasePool::Postgres(p) => run_batch_pg_tx(&p, &statements).await,
+        DatabasePool::MySql(p) => run_batch_mysql_tx(&p, &statements).await,
+        DatabasePool::Sqlite(p) => run_batch_sqlite_tx(&p, &statements).await,
+        DatabasePool::Clickhouse(c) => run_batch_clickhouse(&c, &statements).await,
+        DatabasePool::D1(c) => run_batch_d1(&c, &statements).await,
+    }
+}
+
+async fn run_batch_pg_tx(
+    pool: &sqlx::PgPool,
+    statements: &[String],
+) -> Result<Vec<SqlQueryResult>, String> {
+    let mut tx = pool.begin().await.map_err(|e| format!("BEGIN failed: {}", e))?;
+    let mut results: Vec<SqlQueryResult> = Vec::with_capacity(statements.len());
+
+    for (idx, stmt) in statements.iter().enumerate() {
+        let start = Instant::now();
+        let mut json_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut columns: Vec<String> = Vec::new();
+        let mut affected: u64 = 0;
+        let mut err: Option<String> = None;
+        {
+            let mut stream = sqlx::query(stmt).fetch_many(&mut *tx);
+            loop {
+                match stream.try_next().await {
+                    Ok(Some(Either::Left(qr))) => affected += qr.rows_affected(),
+                    Ok(Some(Either::Right(row))) => {
+                        if columns.is_empty() {
+                            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+                        }
+                        json_rows.push(pg_row_to_json(&row));
+                    }
+                    Ok(None) => break,
+                    Err(e) => { err = Some(enrich_sqlx_err(&e, stmt)); break; }
+                }
+            }
+        }
+        if let Some(msg) = err {
+            let _ = tx.rollback().await;
+            return Err(format!(
+                "Statement {} of {} failed — transaction rolled back, no changes persisted: {}",
+                idx + 1, statements.len(), msg
+            ));
+        }
+        let kind = infer_query_kind(stmt, json_rows.len(), columns.len(), affected);
+        results.push(SqlQueryResult {
+            columns,
+            rows: json_rows,
+            affected_rows: affected,
+            duration_ms: start.elapsed().as_millis() as u64,
+            query_kind: kind,
+        });
+    }
+
+    tx.commit().await.map_err(|e| format!("COMMIT failed: {}", e))?;
+    Ok(results)
+}
+
+async fn run_batch_mysql_tx(
+    pool: &sqlx::MySqlPool,
+    statements: &[String],
+) -> Result<Vec<SqlQueryResult>, String> {
+    let mut tx = pool.begin().await.map_err(|e| format!("BEGIN failed: {}", e))?;
+    let mut results: Vec<SqlQueryResult> = Vec::with_capacity(statements.len());
+
+    for (idx, stmt) in statements.iter().enumerate() {
+        let start = Instant::now();
+        let mut json_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut columns: Vec<String> = Vec::new();
+        let mut affected: u64 = 0;
+        let mut err: Option<String> = None;
+        {
+            let mut stream = sqlx::query(stmt).fetch_many(&mut *tx);
+            loop {
+                match stream.try_next().await {
+                    Ok(Some(Either::Left(qr))) => affected += qr.rows_affected(),
+                    Ok(Some(Either::Right(row))) => {
+                        if columns.is_empty() {
+                            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+                        }
+                        json_rows.push(mysql_row_to_json(&row));
+                    }
+                    Ok(None) => break,
+                    Err(e) => { err = Some(enrich_mysql_err(&e, stmt)); break; }
+                }
+            }
+        }
+        if let Some(msg) = err {
+            let _ = tx.rollback().await;
+            return Err(format!(
+                "Statement {} of {} failed — transaction rolled back, no changes persisted: {}",
+                idx + 1, statements.len(), msg
+            ));
+        }
+        let kind = infer_query_kind(stmt, json_rows.len(), columns.len(), affected);
+        results.push(SqlQueryResult {
+            columns,
+            rows: json_rows,
+            affected_rows: affected,
+            duration_ms: start.elapsed().as_millis() as u64,
+            query_kind: kind,
+        });
+    }
+
+    tx.commit().await.map_err(|e| format!("COMMIT failed: {}", e))?;
+    Ok(results)
+}
+
+async fn run_batch_sqlite_tx(
+    pool: &sqlx::SqlitePool,
+    statements: &[String],
+) -> Result<Vec<SqlQueryResult>, String> {
+    let mut tx = pool.begin().await.map_err(|e| format!("BEGIN failed: {}", e))?;
+    let mut results: Vec<SqlQueryResult> = Vec::with_capacity(statements.len());
+
+    for (idx, stmt) in statements.iter().enumerate() {
+        let start = Instant::now();
+        let mut json_rows: Vec<Vec<serde_json::Value>> = Vec::new();
+        let mut columns: Vec<String> = Vec::new();
+        let mut affected: u64 = 0;
+        let mut err: Option<String> = None;
+        {
+            let mut stream = sqlx::query(stmt).fetch_many(&mut *tx);
+            loop {
+                match stream.try_next().await {
+                    Ok(Some(Either::Left(qr))) => affected += qr.rows_affected(),
+                    Ok(Some(Either::Right(row))) => {
+                        if columns.is_empty() {
+                            columns = row.columns().iter().map(|c| c.name().to_string()).collect();
+                        }
+                        json_rows.push(sqlite_row_to_json(&row));
+                    }
+                    Ok(None) => break,
+                    Err(e) => { err = Some(e.to_string()); break; }
+                }
+            }
+        }
+        if let Some(msg) = err {
+            let _ = tx.rollback().await;
+            return Err(format!(
+                "Statement {} of {} failed — transaction rolled back, no changes persisted: {}",
+                idx + 1, statements.len(), msg
+            ));
+        }
+        let kind = infer_query_kind(stmt, json_rows.len(), columns.len(), affected);
+        results.push(SqlQueryResult {
+            columns,
+            rows: json_rows,
+            affected_rows: affected,
+            duration_ms: start.elapsed().as_millis() as u64,
+            query_kind: kind,
+        });
+    }
+
+    tx.commit().await.map_err(|e| format!("COMMIT failed: {}", e))?;
+    Ok(results)
+}
+
+async fn run_batch_clickhouse(
+    client: &ClickhouseClient,
+    statements: &[String],
+) -> Result<Vec<SqlQueryResult>, String> {
+    // ClickHouse has no general-purpose transactions, so this is a
+    // sequential auto-commit run. Stops on first failure; earlier
+    // statements remain persisted. We surface this in the error message
+    // so callers know rollback wasn't possible.
+    let mut results: Vec<SqlQueryResult> = Vec::with_capacity(statements.len());
+    for (idx, stmt) in statements.iter().enumerate() {
+        let start = Instant::now();
+        match client.query(stmt).await {
+            Ok(r) => {
+                results.push(SqlQueryResult {
+                    columns: r.columns,
+                    rows: r.rows,
+                    affected_rows: r.affected,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    query_kind: classify_query(stmt),
+                });
+            }
+            Err(e) => {
+                let persisted = if idx == 0 {
+                    "no prior statements were persisted".to_string()
+                } else {
+                    format!("statements 1..{} are already persisted", idx)
+                };
+                return Err(format!(
+                    "Statement {} of {} failed — ClickHouse has no rollback, {}: {}",
+                    idx + 1, statements.len(), persisted, e
+                ));
+            }
+        }
+    }
+    Ok(results)
+}
+
+async fn run_batch_d1(
+    client: &D1Client,
+    statements: &[String],
+) -> Result<Vec<SqlQueryResult>, String> {
+    // D1 has no transactions across requests. Same caveat as ClickHouse:
+    // sequential, stops on first failure, earlier writes are persisted.
+    let mut results: Vec<SqlQueryResult> = Vec::with_capacity(statements.len());
+    for (idx, stmt) in statements.iter().enumerate() {
+        let start = Instant::now();
+        match client.query(stmt).await {
+            Ok(r) => {
+                results.push(SqlQueryResult {
+                    columns: r.columns,
+                    rows: r.rows,
+                    affected_rows: r.affected,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                    query_kind: classify_query(stmt),
+                });
+            }
+            Err(e) => {
+                let persisted = if idx == 0 {
+                    "no prior statements were persisted".to_string()
+                } else {
+                    format!("statements 1..{} are already persisted", idx)
+                };
+                return Err(format!(
+                    "Statement {} of {} failed — D1 has no rollback, {}: {}",
+                    idx + 1, statements.len(), persisted, e
+                ));
+            }
+        }
+    }
+    Ok(results)
 }
 
 /// One attempt at executing a query — captures the dialect-specific kill
@@ -1524,30 +1913,73 @@ pub async fn sql_list_tables(
 
     match pool {
         DatabasePool::Postgres(p) => {
-            let schema_name = schema.unwrap_or_else(|| "public".to_string());
-            let rows = sqlx::query_as::<_, (String, String)>(
-                "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = $1 AND table_type = 'BASE TABLE' ORDER BY table_name",
-            )
-            .bind(&schema_name)
-            .fetch_all(p)
-            .await
-            .map_err(|e| e.to_string())?;
+            // When the caller specifies a schema, scope tightly (used by the
+            // nav tree's per-schema views). When they don't, return tables
+            // across every USER schema — autocomplete and the editor's
+            // cross-schema search both need the full picture, and the
+            // previous "default to public" silently hid every custom
+            // schema's tables from suggestions.
+            match schema.as_deref() {
+                Some(s) if !s.is_empty() => {
+                    let rows = sqlx::query_as::<_, (String, String)>(
+                        "SELECT table_name, table_type FROM information_schema.tables \
+                         WHERE table_schema = $1 \
+                         AND table_type IN ('BASE TABLE', 'VIEW') \
+                         ORDER BY table_name",
+                    )
+                    .bind(s)
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
 
-            Ok(rows
-                .into_iter()
-                .map(|(name, table_type)| {
-                    let tt = if table_type == "BASE TABLE" {
-                        "TABLE".to_string()
-                    } else {
-                        table_type
-                    };
-                    TableInfo {
-                        name,
-                        table_type: tt,
-                        row_count: None,
-                    }
-                })
-                .collect())
+                    Ok(rows
+                        .into_iter()
+                        .map(|(name, table_type)| {
+                            let tt = if table_type == "BASE TABLE" {
+                                "TABLE".to_string()
+                            } else {
+                                table_type
+                            };
+                            TableInfo {
+                                name,
+                                table_type: tt,
+                                row_count: None,
+                                schema: Some(s.to_string()),
+                            }
+                        })
+                        .collect())
+                }
+                _ => {
+                    let rows = sqlx::query_as::<_, (String, String, String)>(
+                        "SELECT table_schema, table_name, table_type FROM information_schema.tables \
+                         WHERE table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast') \
+                         AND table_schema NOT LIKE 'pg_temp_%' \
+                         AND table_schema NOT LIKE 'pg_toast_temp_%' \
+                         AND table_type IN ('BASE TABLE', 'VIEW') \
+                         ORDER BY table_schema, table_name",
+                    )
+                    .fetch_all(p)
+                    .await
+                    .map_err(|e| e.to_string())?;
+
+                    Ok(rows
+                        .into_iter()
+                        .map(|(table_schema, name, table_type)| {
+                            let tt = if table_type == "BASE TABLE" {
+                                "TABLE".to_string()
+                            } else {
+                                table_type
+                            };
+                            TableInfo {
+                                name,
+                                table_type: tt,
+                                row_count: None,
+                                schema: Some(table_schema),
+                            }
+                        })
+                        .collect())
+                }
+            }
         }
         DatabasePool::MySql(p) => {
             let db = database_opt.clone().unwrap_or_default();
@@ -1578,6 +2010,7 @@ pub async fn sql_list_tables(
                         name,
                         table_type: tt,
                         row_count: None,
+                        schema: None,
                     }
                 })
                 .collect())
@@ -1596,6 +2029,7 @@ pub async fn sql_list_tables(
                     name,
                     table_type: table_type.to_uppercase(),
                     row_count: None,
+                    schema: None,
                 })
                 .collect())
         }
@@ -1624,7 +2058,7 @@ pub async fn sql_list_tables(
                     } else {
                         "TABLE".to_string()
                     };
-                    Some(TableInfo { name, table_type, row_count: None })
+                    Some(TableInfo { name, table_type, row_count: None, schema: None })
                 })
                 .collect())
         }
@@ -1652,7 +2086,7 @@ pub async fn sql_list_tables(
                         .next()
                         .and_then(|v| v.as_str().map(|s| s.to_uppercase()))
                         .unwrap_or_else(|| "TABLE".to_string());
-                    Some(TableInfo { name, table_type, row_count: None })
+                    Some(TableInfo { name, table_type, row_count: None, schema: None })
                 })
                 .collect())
         }

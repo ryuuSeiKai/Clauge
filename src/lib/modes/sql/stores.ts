@@ -27,6 +27,11 @@ export const expandedConnectionId = writable<string | null>(null);
 // Cached metadata per `(conn, db)` key — fetched lazily by SqlNav / SqlPanel.
 export const connectionDatabases = writable<Map<string, string[]>>(new Map());
 export const databaseTables = writable<Map<string, TableInfo[]>>(new Map());
+/** Resolved default schema per `(conn, db)`. Populated when a Postgres
+ *  pool transitions to `connected` via `current_schema()`. Used by the
+ *  editor as the unqualified-completion hint, replacing a hardcoded
+ *  `public` that didn't fit users whose tables live elsewhere. */
+export const defaultSchemas = writable<Map<string, string>>(new Map());
 
 // --- Pool state (keyed by `${connId}:${db}`) ---------------------------------
 
@@ -116,6 +121,11 @@ export async function disconnectConnection(connId: string) {
     return n;
   });
   databaseTables.update((m) => {
+    const n = new Map(m);
+    for (const k of [...n.keys()]) if (k.startsWith(prefix)) n.delete(k);
+    return n;
+  });
+  defaultSchemas.update((m) => {
     const n = new Map(m);
     for (const k of [...n.keys()]) if (k.startsWith(prefix)) n.delete(k);
     return n;
@@ -255,9 +265,14 @@ export async function handleSqlConnectionSave(config: SqlConnectionConfig) {
     // store-level caches so the UI doesn't show stale databases/tables, and
     // notify components with local caches to invalidate via the version bump.
     connectionDatabases.update((m) => { const n = new Map(m); n.delete(editing.id); return n; });
+    const prefix = `${editing.id}:`;
     databaseTables.update((m) => {
       const n = new Map(m);
-      const prefix = `${editing.id}:`;
+      for (const k of [...n.keys()]) if (k.startsWith(prefix)) n.delete(k);
+      return n;
+    });
+    defaultSchemas.update((m) => {
+      const n = new Map(m);
       for (const k of [...n.keys()]) if (k.startsWith(prefix)) n.delete(k);
       return n;
     });

@@ -59,7 +59,12 @@ fn humanize_d1_code(code: i64) -> Option<&'static str> {
         // D1-specific.
         7400 => Some("Bad SQL — D1 rejected the statement"),
         7404 => Some("Database not found — check the Database ID"),
-        7500 => Some("D1 internal error — retry in a moment"),
+        // 7500 is Cloudflare's catch-all "server-side problem" — it covers
+        // worker timeouts, unsupported SQL features, CPU-budget exhaustion,
+        // schema migration races, and more. It is NOT reliably transient,
+        // so we do not promise a retry. The real reason lives in the
+        // `errors[].message` field and is appended by the caller.
+        7500 => Some("D1 server-side error"),
         7501 => Some("Rate-limited by Cloudflare — wait and retry"),
         7503 => Some("Response too large — D1 caps results at ~100 KB"),
         // Cloudflare generic.
@@ -206,14 +211,29 @@ impl D1Client {
     }
 
     /// Execute a single SQL statement and return parsed rows + meta.
+    /// Convenience wrapper around `query_params` for the common no-params case.
+    pub async fn query(&self, sql: &str) -> Result<D1QueryRows, String> {
+        self.query_params(sql, &[]).await
+    }
+
+    /// Execute a single parameterised SQL statement against D1.
+    ///
+    /// Cloudflare's API accepts `{"sql": "...", "params": [...]}` where the
+    /// SQL uses `?` placeholders. Prefer this over `query()` whenever the
+    /// SQL is built from any data the user controls — string-concatenation
+    /// into the SQL field is a SQL-injection surface.
     ///
     /// D1 supports semicolon-separated batches and returns one result per
     /// statement in `result[]`. We pick `result[0]` so multi-statement
     /// behaviour matches the other drivers (run-the-first, ignore the rest).
-    /// Users who need true batching can write a single statement.
-    pub async fn query(&self, sql: &str) -> Result<D1QueryRows, String> {
+    pub async fn query_params(
+        &self,
+        sql: &str,
+        params: &[serde_json::Value],
+    ) -> Result<D1QueryRows, String> {
         let body = serde_json::json!({
             "sql": sql,
+            "params": params,
         });
 
         let response = self
@@ -245,12 +265,16 @@ impl D1Client {
         })?;
 
         if !parsed.success {
-            // Prefer the per-code hand-written message; fall back to the
-            // first descriptive message in the errors array.
+            // Always combine our friendly label with the raw driver message.
+            // Cloudflare's 7500 in particular is a catch-all whose label
+            // alone tells the user nothing — the underlying reason lives in
+            // `errors[].message` and was previously discarded.
             let first_code = parsed.errors.first().map(|e| e.code).unwrap_or(0);
+            let raw_body = clean_d1_error_body(&parsed.errors);
             let msg = match humanize_d1_code(first_code) {
-                Some(m) => m.to_string(),
-                None => clean_d1_error_body(&parsed.errors),
+                Some(label) if raw_body.is_empty() => label.to_string(),
+                Some(label) => format!("{} — {}", label, raw_body),
+                None => raw_body,
             };
             return Err(msg);
         }

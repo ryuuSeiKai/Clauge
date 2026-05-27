@@ -403,6 +403,11 @@
     openSettingsTab('ai');
   }
 
+  function openAiByokSettings() {
+    close();
+    openSettingsTab('ai:byok');
+  }
+
   function openAccountSettings() {
     close();
     openSettingsTab('account');
@@ -604,7 +609,7 @@
       nvidia: 'nvidia/nemotron-3-super-120b-a12b',
       openrouter: 'meta-llama/llama-3.3-70b-instruct:free',
       openai_direct: 'gpt-4.1-mini',
-      gemini: 'gemini-3.1-flash-lite-preview',
+      gemini: 'gemini-3.1-flash-lite',
       clauge: 'clauge-managed',
     };
     const modelId = MODEL_MAP[provider] || 'claude-haiku-4-5-20251001';
@@ -756,11 +761,31 @@
             mapped = { type: 'generic', message: 'AI service is temporarily unavailable. Try again in a moment.' };
           } else if (errLower.includes('400') || errLower.includes('422') || errLower.includes('bad request') || errLower.includes('invalid request')) {
             mapped = { type: 'generic', message: "Couldn't process that request. Try rephrasing." };
-          } else if (errLower.includes('quota') || errLower.includes('insufficient')) {
-            mapped = { type: 'generic', message: 'API quota exceeded. Check your account.' };
+          } else if (
+            errLower.includes('credits') ||
+            errLower.includes('insufficient_credits') ||
+            errLower.includes('insufficient') ||
+            errLower.includes('quota') ||
+            errLower.includes('402') ||
+            errLower.includes('payment required')
+          ) {
+            // Clauge AI returns 402 with {"error":"INSUFFICIENT_CREDITS","message":"out of Clauge AI credits this cycle",...}.
+            // Other providers use 402 / "insufficient_quota" for billing exhaustion.
+            if (provider === 'clauge') {
+              mapped = {
+                type: 'credits',
+                message: "You're out of Clauge AI credits for this cycle. Topup in Settings → Account to continue using Clauge AI, or switch to your own API key.",
+              };
+            } else {
+              mapped = {
+                type: 'credits',
+                message: 'Credits exhausted with your AI provider. Check your account billing or switch providers in Settings.',
+              };
+            }
           } else {
             mapped = { type: 'generic', message: 'Something went wrong. Try again.' };
           }
+          if (mapped) mapped.provider = provider;
           messages[lastIdx].error = mapped;
           messages[lastIdx].isStreaming = false;
           isStreaming = false;
@@ -1112,30 +1137,34 @@
             {/if}
 
             {#if msg.error}
-              <div class="ai-error-block" class:rate-limit={msg.error.type === 'rate_limit'} class:auth-error={msg.error.type === 'auth' || msg.error.type === 'cloud_auth'}>
+              <div class="ai-error-block" class:rate-limit={msg.error.type === 'rate_limit'} class:auth-error={msg.error.type === 'auth' || msg.error.type === 'cloud_auth'} class:credits-error={msg.error.type === 'credits'}>
                 <div class="ai-error-icon">
                   {#if msg.error.type === 'rate_limit'}
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                   {:else if msg.error.type === 'auth' || msg.error.type === 'cloud_auth'}
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                  {:else if msg.error.type === 'credits'}
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="6" width="20" height="13" rx="2"/><line x1="2" y1="11" x2="22" y2="11"/><line x1="6" y1="15" x2="10" y2="15"/></svg>
                   {:else}
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
                   {/if}
                 </div>
                 <div class="ai-error-body">
                   <span class="ai-error-msg">{msg.error.message}</span>
-                  <div class="ai-error-actions">
-                    {#if msg.error.type === 'rate_limit'}
-                      <button class="ai-error-btn" onclick={retryLastMessage}>Retry</button>
-                    {:else if msg.error.type === 'cloud_auth'}
-                      <button class="ai-error-btn" onclick={openAccountSettings}>Open Account</button>
-                      <button class="ai-error-btn" onclick={retryLastMessage}>Retry</button>
-                    {:else if msg.error.type === 'auth'}
-                      <button class="ai-error-btn" onclick={openAiSettings}>Open Settings</button>
-                    {:else}
-                      <button class="ai-error-btn" onclick={retryLastMessage}>Retry</button>
-                    {/if}
-                  </div>
+                  {#if msg.error.type !== 'credits'}
+                    <div class="ai-error-actions">
+                      {#if msg.error.type === 'rate_limit'}
+                        <button class="ai-error-btn" onclick={retryLastMessage}>Retry</button>
+                      {:else if msg.error.type === 'cloud_auth'}
+                        <button class="ai-error-btn" onclick={openAccountSettings}>Open Account</button>
+                        <button class="ai-error-btn" onclick={retryLastMessage}>Retry</button>
+                      {:else if msg.error.type === 'auth'}
+                        <button class="ai-error-btn" onclick={openAiSettings}>Open Settings</button>
+                      {:else}
+                        <button class="ai-error-btn" onclick={retryLastMessage}>Retry</button>
+                      {/if}
+                    </div>
+                  {/if}
                 </div>
               </div>
             {/if}

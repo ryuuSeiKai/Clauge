@@ -55,6 +55,12 @@
       useSshTunnel = !!sid;
       selectedSshProfileId = sid;
       tab = 'general';
+      // Reset test state — without this, an in-flight test from a
+      // *previous* modal opening (e.g. closing DB-A's edit mid-test
+      // and opening DB-B) leaves the spinner visibly running in the
+      // new modal until the orphaned test finally times out.
+      testing = false;
+      testStatus = '';
       testOk = false;
     } else if (show && !editConnection) {
       name = '';
@@ -68,6 +74,8 @@
       useSshTunnel = false;
       selectedSshProfileId = null;
       tab = 'general';
+      testing = false;
+      testStatus = '';
       testOk = false;
     }
   });
