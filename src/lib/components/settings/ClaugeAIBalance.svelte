@@ -32,7 +32,7 @@
       </svg>
     </div>
     <div class="cai-body">
-      <h3 class="cai-title">Clauge AI</h3>
+      <h3 class="cai-title">Synapse AI</h3>
       <p class="cai-desc">Managed AI assistance, included with Pro. Skip the API key setup.</p>
     </div>
     <button class="cai-btn cai-btn-primary" onclick={onUpgradeClick}>Upgrade to Pro</button>
@@ -40,7 +40,7 @@
 {:else if credits}
   <div class="cai-card balance">
     <div class="cai-row">
-      <h3 class="cai-title">Clauge AI</h3>
+      <h3 class="cai-title">Synapse AI</h3>
       <span class="cai-badge {subscription?.cancel_at_period_end ? 'cai-badge-warn' : 'cai-badge-ok'}">
         {subscription?.cancel_at_period_end ? 'Cancelling' : 'Active'}
       </span>

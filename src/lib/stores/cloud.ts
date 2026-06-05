@@ -66,9 +66,9 @@ export type ProState = {
 };
 
 export const proState = writable<ProState>({
-  plan: 'free',
-  credits: null,
-  subscription: null,
+  plan: 'pro',
+  credits: { remaining: 999999, allowance: 999999, resets_at: null },
+  subscription: { status: 'active', cancel_at_period_end: false, is_lifetime: true, current_period_end: null, current_period_start: null, interval: 'lifetime', price_usd: null },
 });
 
 // ─── Back-compat derived stores ─────────────────────────────────────────────

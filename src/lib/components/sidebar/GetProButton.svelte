@@ -5,7 +5,7 @@
 </script>
 
 {#if isPro}
-  <span class="pill pill-pro" title="Clauge Pro active">
+  <span class="pill pill-pro" title="Synapse Pro active">
     <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M12 2l2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6L12 2z"/>
     </svg>
@@ -15,7 +15,7 @@
   <button
     class="pill pill-free"
     onclick={(e) => { e.stopPropagation(); upgradeModalOpen.set(true); }}
-    title="Upgrade to Clauge Pro"
+    title="Upgrade to Synapse Pro"
   >
     <span class="lbl-free">FREE</span>
     <span class="sep">·</span>

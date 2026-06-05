@@ -10,7 +10,6 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { coworkers, loadCoworkers } from '../stores';
-  import { upgradeModalOpen } from '$lib/stores/cloud';
   import CoworkerAvatar from './CoworkerAvatar.svelte';
   import CoworkerModal from './CoworkerModal.svelte';
   import type { WorkspaceCoworker } from '../types';
@@ -40,13 +39,6 @@
     modalOpen = true;
   }
   function openTile(cw: WorkspaceCoworker) {
-    // Soft-disabled coworkers belong to a previously-Pro account that
-    // downgraded. Clicking them should sell the upgrade, not let the
-    // user edit a personality that's about to be ignored anyway.
-    if (cw.disabledAt != null) {
-      upgradeModalOpen.set(true);
-      return;
-    }
     editing = cw;
     modalOpen = true;
   }

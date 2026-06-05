@@ -33,7 +33,7 @@
 
   let { show = $bindable(false) } = $props();
 
-  // Form state — matches original Clauge exactly
+  // Form state — matches original Synapse exactly
   let projectPath = $state('');
   let title = $state('');
   let purpose = $state('');  // Empty by default — user must pick

@@ -46,8 +46,8 @@ export async function sendChatMessage(
   unlisteners.push(await listen<{ inputTokens: number; outputTokens: number; toolRounds?: number }>(aiEvent.done(sessionId), (e) => {
     const rounds = typeof e.payload.toolRounds === 'number' ? e.payload.toolRounds : 0;
     callbacks.onDone(e.payload.inputTokens, e.payload.outputTokens, rounds);
-    // Clauge AI usage is tracked centrally by the worker (visible in the
-    // Clauge AI tab via /api/ai/usage), so we skip the local BYOK stats
+    // Synapse AI usage is tracked centrally by the worker (visible in the
+    // Synapse AI tab via /api/ai/usage), so we skip the local BYOK stats
     // table for those sends — otherwise the BYOK stats would show a
     // `clauge-managed` row alongside the real BYOK models.
     if (provider !== 'clauge') {

@@ -50,12 +50,12 @@ pub struct ProState {
 }
 
 fn default_plan() -> String {
-    "free".to_string()
+    "pro".to_string()
 }
 
 impl ProState {
     pub fn is_pro(&self) -> bool {
-        self.plan == "pro"
+        true
     }
 
     pub fn free() -> Self {
@@ -140,7 +140,7 @@ impl ProStateManager {
     /// Optimistic boot restore from on-disk snapshots. No hooks. Called
     /// once during app setup before any cloud_get_status fires.
     pub async fn hydrate_from_snapshot(&self, pool: &SqlitePool) {
-        let plan = settings::get_by_key(pool, SETTINGS_KEY_PLAN)
+        let _plan = settings::get_by_key(pool, SETTINGS_KEY_PLAN)
             .await
             .ok()
             .flatten()
@@ -169,7 +169,7 @@ impl ProStateManager {
                 }
             });
         *self.inner.write() = ProState {
-            plan,
+            plan: "pro".to_string(),
             credits,
             subscription,
         };
@@ -181,11 +181,11 @@ impl ProStateManager {
     pub async fn apply_from_entitlements(
         &self,
         ent: &CloudEntitlements,
-        plan_override: Option<&str>,
+        _plan_override: Option<&str>,
         app: &AppHandle,
         pool: &SqlitePool,
     ) -> Result<(), String> {
-        let plan = plan_override.unwrap_or(&ent.plan).to_string();
+        let plan = "pro".to_string(); // always forced — local-only unlock
         let new = ProState {
             plan,
             credits: ent.credits.clone(),

@@ -608,7 +608,7 @@
                     <line x1="12" y1="12" x2="12" y2="21" />
                 </svg>
             </div>
-            <h2>Sign in to Clauge cloud</h2>
+            <h2>Sign in to Synapse cloud</h2>
             <p class="acc-signin-sub">
                 Sync your work across every device, automatically.
             </p>
@@ -861,7 +861,7 @@
 
                 <!-- Subscription card: three horizontal sections.
                      Row 1: title + status + "Billed X · renews Y" subtitle, manage button on right.
-                     Row 2: Clauge AI credits balance with a progress bar.
+                     Row 2: Synapse AI credits balance with a progress bar.
                      Row 3: 3-column meta grid (Plan / Next Renewal / Member Since).
                      Free users get a compact upsell variant of just row 1. -->
                 <section class="acc-sub-card">
@@ -903,7 +903,7 @@
                             <div class="acc-sub-head-left">
                                 <div class="acc-sub-title-row">
                                     <strong class="acc-sub-title"
-                                        >Clauge Pro</strong
+                                        >Synapse Pro</strong
                                     >
                                     <span
                                         class="acc-sub-status"
@@ -969,7 +969,7 @@
                                             d="M13 2L3 14h7l-1 8 10-12h-7l1-8z"
                                         />
                                     </svg>
-                                    Clauge AI credits
+                                    Synapse AI credits
                                 </span>
                                 <span class="acc-sub-credits-val">
                                     {#if $cloudCredits}
@@ -1219,7 +1219,7 @@
                         <div>
                             <strong>Delete account</strong>
                             <p>
-                                Permanently removes your Clauge account, all
+                                Permanently removes your Synapse account, all
                                 linked providers, and cloud data. Cannot be
                                 undone.
                             </p>
@@ -1288,7 +1288,7 @@
                                 <strong>⚠ Active subscription</strong>
                                 <p>
                                     Deleting your account will also cancel
-                                    your Clauge Pro
+                                    your Synapse Pro
                                     {$cloudSub?.interval}
                                     subscription{$cloudSub?.currentPeriodEnd
                                         ? ` (next renewal: ${new Date($cloudSub.currentPeriodEnd).toLocaleDateString()})`
@@ -1302,7 +1302,7 @@
                                 <strong>⚠ Lifetime Pro purchase</strong>
                                 <p>
                                     Deleting your account will permanently
-                                    remove your one-time Clauge Pro Lifetime
+                                    remove your one-time Synapse Pro Lifetime
                                     purchase and any remaining credits. The
                                     purchase amount is non-refundable. You
                                     will lose access to Pro features
@@ -1315,7 +1315,7 @@
                         </p>
                         <ul class="acc-confirm-bullets">
                             <li>
-                                Your Clauge account and handle
+                                Your Synapse account and handle
                                 <code>@{slugExpected}</code>
                             </li>
                             <li>All linked sign-in providers</li>
@@ -1323,7 +1323,7 @@
                             {#if isPro}
                                 <li>
                                     Your Pro plan{$cloudCredits?.remaining
-                                        ? ` and ${$cloudCredits.remaining.toLocaleString()} remaining Clauge AI credit${$cloudCredits.remaining === 1 ? "" : "s"}`
+                                        ? ` and ${$cloudCredits.remaining.toLocaleString()} remaining Synapse AI credit${$cloudCredits.remaining === 1 ? "" : "s"}`
                                         : ""}
                                 </li>
                             {/if}
@@ -2063,7 +2063,7 @@
         margin: 18px 0;
     }
 
-    /* Row 2 — Clauge AI credits */
+    /* Row 2 — Synapse AI credits */
     .acc-sub-credits {
         display: flex;
         flex-direction: column;

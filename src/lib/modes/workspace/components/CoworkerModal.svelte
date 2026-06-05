@@ -12,7 +12,6 @@
     workspaceCoworkerCreate,
     workspaceCoworkerUpdate,
     workspaceCoworkerDelete,
-    workspaceCoworkerList,
   } from '../commands';
   import { currentUserActor } from '../attribution';
   import { loadCoworkers } from '../stores';
@@ -20,8 +19,7 @@
   import { showToast } from '$lib/shared/primitives/toast';
   import { errorToast, friendlyError } from '$lib/utils/errors';
   import CoworkerAvatar from './CoworkerAvatar.svelte';
-  import { cloudPlan, upgradeModalOpen } from '$lib/stores/cloud';
-
+  
   interface Props {
     show: boolean;
     /** When set, the modal is in EDIT mode for this coworker. */
@@ -40,7 +38,6 @@
   let provider = $state('claude');
   let saving = $state(false);
   let confirmingDelete = $state(false);
-  let showProRequired = $state(false);
 
   const PROVIDER_OPTIONS = [
     { id: 'claude', label: 'Claude', color: '#d4a96a' },
@@ -92,7 +89,6 @@
       avatarStyle  = existing?.avatarStyle ?? 'bottts';
       provider     = existing?.provider ?? 'claude';
       confirmingDelete = false;
-      showProRequired = false;
     }
   });
 
@@ -110,14 +106,6 @@
 
   async function save() {
     if (!canSave) return;
-    if (!isEdit && $cloudPlan !== 'pro') {
-      const all = await workspaceCoworkerList();
-      const activeCount = all.filter((c) => c.disabledAt == null).length;
-      if (activeCount >= 3) {
-        showProRequired = true;
-        return;
-      }
-    }
     saving = true;
     try {
       const seedToSave = avatarSeed.trim() || name.trim();
@@ -275,16 +263,6 @@
         </div>
       </div>
 
-      {#if showProRequired}
-        <div class="cm-pro-gate">
-          <span class="cm-pro-gate-text">Free plan supports up to 3 coworkers.</span>
-          <button
-            class="cm-btn-primary"
-            onclick={() => { upgradeModalOpen.set(true); showProRequired = false; show = false; }}
-          >Upgrade to Pro</button>
-          <button class="cm-btn-secondary" onclick={() => (showProRequired = false)}>Cancel</button>
-        </div>
-      {:else}
       <div class="cm-foot">
         {#if isEdit}
           {#if confirmingDelete}
@@ -301,7 +279,6 @@
           {saving ? 'Saving…' : isEdit ? 'Save' : 'Create coworker'}
         </button>
       </div>
-      {/if}
     </div>
   </div>
 {/if}

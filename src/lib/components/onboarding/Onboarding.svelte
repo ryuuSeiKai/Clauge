@@ -192,12 +192,12 @@
         <div class="ob-card">
             <img
                 src="/clauge-icon-animated.svg"
-                alt="Clauge"
+                alt="Synapse"
                 class="ob-logo"
                 width="72"
                 height="72"
             />
-            <h1 class="ob-title">Welcome to Clauge</h1>
+            <h1 class="ob-title">Welcome to Synapse</h1>
             <p class="ob-sub">Sign in to get started</p>
 
             <div class="ob-btns">

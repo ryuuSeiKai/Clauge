@@ -133,25 +133,12 @@ pub async fn list_active_cards_for_coworker(
 }
 
 /// Stamp `disabled_at` on all coworkers ordered by created_at ASC beyond
-/// the first `keep_count` — used when a Pro subscription lapses, freezing
-/// extra coworkers without deleting them. Returns the number stamped.
+/// the first `keep_count` — disabled locally (Pro always true).
 pub async fn disable_beyond_first_n(
-    pool: &SqlitePool,
-    keep_count: i64,
+    _pool: &SqlitePool,
+    _keep_count: i64,
 ) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        "UPDATE workspace_coworkers
-            SET disabled_at = datetime('now')
-          WHERE disabled_at IS NULL
-            AND id NOT IN (
-                SELECT id FROM workspace_coworkers
-                ORDER BY created_at ASC LIMIT ?
-            )",
-    )
-    .bind(keep_count)
-    .execute(pool)
-    .await?;
-    Ok(result.rows_affected())
+    Ok(0)
 }
 
 /// Clear `disabled_at` on every coworker — used when Pro is restored.

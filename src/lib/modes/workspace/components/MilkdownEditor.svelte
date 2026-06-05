@@ -13,7 +13,7 @@
   // Crepe ships its own theme stylesheets. We import them once at the
   // module level so any number of editor instances on a page share the
   // same styles. The "frame" theme is the closest to Notion's clean
-  // light-on-dark look once we layer Clauge tokens on top.
+  // light-on-dark look once we layer Synapse tokens on top.
   import '@milkdown/crepe/theme/common/style.css';
   import '@milkdown/crepe/theme/frame-dark.css';
 
@@ -82,13 +82,13 @@
     flex: 1;
     min-height: 0;
     overflow: auto;
-    /* Crepe's frame-dark theme uses its own background; Clauge's
+    /* Crepe's frame-dark theme uses its own background; Synapse's
        theme tokens flow through where we override below. */
   }
   .md-host::-webkit-scrollbar { width: 6px; }
   .md-host::-webkit-scrollbar-thumb { background: var(--b1); border-radius: 3px; }
 
-  /* Re-skin Crepe to match Clauge tokens. We're targeting the editor
+  /* Re-skin Crepe to match Synapse tokens. We're targeting the editor
      root that Crepe mounts; :global is needed because the milkdown
      subtree isn't owned by this Svelte component scope. */
   :global(.md-host .milkdown) {

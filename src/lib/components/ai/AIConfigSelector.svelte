@@ -1,15 +1,11 @@
 <script lang="ts">
-  import { cloudPlan, upgradeModalOpen } from '$lib/stores/cloud';
   import { settings, setSetting } from '$lib/stores/settings';
-  import { PROVIDERS, type ProviderId } from '$lib/shared/ai/providers';
+  import { PROVIDERS } from '$lib/shared/ai/providers';
 
   const CLAUGE = 'clauge';
 
-  const isPro = $derived($cloudPlan === 'pro');
-  // Pro users default to Clauge AI (the thing they paid for) when they
-  // haven't explicitly chosen a provider. Free users default to 'claude'.
   const current = $derived<string>(
-    $settings['ai_provider'] || (isPro ? CLAUGE : 'claude'),
+    $settings['ai_provider'] || 'claude',
   );
   const isCurrentClauge = $derived(current === CLAUGE);
 
@@ -22,7 +18,7 @@
   // Resolve metadata for the currently-selected provider (for the pill label).
   const currentLabel = $derived(
     current === CLAUGE
-      ? 'Clauge AI'
+      ? 'Synapse AI'
       : (PROVIDERS.find((p) => p.providerId === current)?.providerLabel ?? 'Claude'),
   );
 
@@ -35,11 +31,6 @@
   }
 
   function selectProvider(id: string) {
-    if (id === CLAUGE && !isPro) {
-      open = false;
-      upgradeModalOpen.set(true);
-      return;
-    }
     setSetting('ai_provider', id);
     open = false;
   }
@@ -111,7 +102,7 @@
     role="listbox"
     aria-label="Choose AI provider"
   >
-    <!-- Clauge AI — pinned at top. Always shown; gated by Pro. -->
+    <!-- Synapse AI — pinned at top. -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
@@ -129,14 +120,10 @@
         </svg>
       </span>
       <span class="acs-row-text">
-        <span class="acs-row-name">Clauge AI</span>
-        <span class="acs-row-sub">
-          {#if isPro}Managed · no API key needed{:else}Requires Pro{/if}
-        </span>
+        <span class="acs-row-name">Synapse AI</span>
+        <span class="acs-row-sub">Managed · no API key needed</span>
       </span>
-      {#if !isPro}
-        <span class="acs-pro-badge">PRO</span>
-      {:else if isCurrentClauge}
+      {#if isCurrentClauge}
         <span class="acs-check" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12" />

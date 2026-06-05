@@ -30,7 +30,7 @@
   import { aiEvent } from '$lib/shared/constants/events';
   import { COPY_FEEDBACK_MS } from '$lib/shared/constants/timings';
   import AIConfigSelector from './AIConfigSelector.svelte';
-  import { cloudPlan, upgradeModalOpen } from '$lib/stores/cloud';
+  
 
   marked.setOptions({ breaks: true, gfm: true });
 
@@ -269,24 +269,16 @@
     }
   });
 
-  // The active provider — Clauge AI (managed) or any BYOK provider id from
+  // The active provider — Synapse AI (managed) or any BYOK provider id from
   // the PROVIDERS catalogue. Stored in flat settings under `ai_provider`.
-  // Default matches AIConfigSelector and sendMessage: Pro users land on
-  // 'clauge' (managed, no key needed) when they've never picked a
-  // provider explicitly; free users land on 'claude' (BYOK). Without
-  // this Pro-aware default, a Pro user with no saved ai_provider and
-  // no BYOK key sees the "Configure in Settings" gate even though
-  // their credits would route fine through Clauge AI.
   let activeProvider = $derived<string>(
-    $settings['ai_provider'] || ($cloudPlan === 'pro' ? 'clauge' : 'claude')
+    $settings['ai_provider'] || 'claude'
   );
 
-  // Panel is usable when:
-  //   - Clauge AI is active and user is Pro (managed → no key needed), or
-  //   - A BYOK provider is active and that provider has its key configured.
+  // Panel is usable when the active provider has its key configured.
   let hasApiKey = $derived(
     activeProvider === 'clauge'
-      ? $cloudPlan === 'pro'
+      ? true
       : !!$settings[`ai_api_key_${activeProvider}`]?.trim()
   );
 
@@ -510,23 +502,18 @@
     // (e.g. backend not yet ready on cold boot) can't block the send.
     invoke('telemetry_bump', { key: 'ai.chat' }).catch(() => {});
 
-    // Resolve provider + api key. Clauge AI is just another provider — but
+    // Resolve provider + api key. Synapse AI is just another provider — but
     // its "api key" is the user's cloud bearer token (fetched at send time)
     // and it needs an X-Provider header so the worker can pick the right
     // JWKS to validate the token against.
     // Default matches AIConfigSelector: Pro → 'clauge', Free → 'claude'.
-    const provider = $settings['ai_provider'] ||
-      (get(cloudPlan) === 'pro' ? 'clauge' : 'claude');
+    const provider = $settings['ai_provider'] || 'claude';
     let apiKey = $settings[`ai_api_key_${provider}`] || '';
     let extraHeaders: Record<string, string> | undefined;
     if (provider === 'clauge') {
-      if (get(cloudPlan) !== 'pro') {
-        upgradeModalOpen.set(true);
-        return;
-      }
       const tok = await cloudGetActiveToken();
       if (!tok) {
-        showToast('Sign in to Clauge to use managed AI', 'error');
+        showToast('Sign in to Synapse to use managed AI', 'error');
         return;
       }
       apiKey = tok[0];
@@ -557,7 +544,7 @@
 
     // Short-circuit: SQL + NoSQL chats need a bound connection + database
     // before the LLM can answer anything useful. If the user hasn't set
-    // one up, reply locally with guidance instead of burning a Clauge AI
+    // one up, reply locally with guidance instead of burning a Synapse AI
     // credit (or a BYOK API call) on an unanswerable prompt. Status is
     // computed in the mode's gather*Context() and surfaced as the
     // `target_status` env var; NoSQL also exposes `target_driver` so we
@@ -746,12 +733,12 @@
           if (errLower.includes('rate limit') || errLower.includes('429') || errLower.includes('too many')) {
             mapped = { type: 'rate_limit', message: 'Rate limited. Wait a moment and try again.' };
           } else if (errLower.includes('invalid api key') || errLower.includes('401') || errLower.includes('unauthorized') || errLower.includes('sign in required')) {
-            // Clauge AI has no API key — auth is the user's cloud session
+            // Synapse AI has no API key — auth is the user's cloud session
             // token, which rotates (Google id_tokens expire after ~1h). A
             // 401 here means "session expired, refresh by signing in", not
             // "your stored key is wrong". Different message + action.
             if (provider === 'clauge') {
-              mapped = { type: 'cloud_auth', message: 'Your Clauge session expired. Open Settings → Account and sign in again, then retry.' };
+              mapped = { type: 'cloud_auth', message: 'Your Synapse session expired. Open Settings → Account and sign in again, then retry.' };
             } else {
               mapped = { type: 'auth', message: 'Invalid API key. Check your key in Settings.' };
             }
@@ -769,12 +756,12 @@
             errLower.includes('402') ||
             errLower.includes('payment required')
           ) {
-            // Clauge AI returns 402 with {"error":"INSUFFICIENT_CREDITS","message":"out of Clauge AI credits this cycle",...}.
+            // Synapse AI returns 402 with {"error":"INSUFFICIENT_CREDITS","message":"out of Synapse AI credits this cycle",...}.
             // Other providers use 402 / "insufficient_quota" for billing exhaustion.
             if (provider === 'clauge') {
               mapped = {
                 type: 'credits',
-                message: "You're out of Clauge AI credits for this cycle. Topup in Settings → Account to continue using Clauge AI, or switch to your own API key.",
+                message: "You're out of Synapse AI credits for this cycle. Topup in Settings → Account to continue using Synapse AI, or switch to your own API key.",
               };
             } else {
               mapped = {

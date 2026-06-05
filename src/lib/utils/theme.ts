@@ -296,7 +296,7 @@ const themes: Record<string, Theme> = {
     glass: false,
     accent: '#b8395a',
     effectClass: 'fx-atelier',
-    premium: true,
+    premium: false,
   },
   // Petal — premium theme. Deep plum-violet surfaces with cherry-pink
   // accent. Animation: cherry blossom petals (PetalFall.svelte) drift
@@ -329,7 +329,7 @@ const themes: Record<string, Theme> = {
     glass: false,
     accent: '#f4a5b8',
     effectClass: 'fx-petal',
-    premium: true,
+    premium: false,
   },
 
   // Celeste — premium theme. Deep cosmic violet-black with silver
@@ -363,7 +363,7 @@ const themes: Record<string, Theme> = {
     glass: false,
     accent: '#a8b8e8',
     effectClass: 'fx-celeste',
-    premium: true,
+    premium: false,
   },
 
   // Hearth — premium theme. Deep warm charcoal with amber accent, and
@@ -399,7 +399,7 @@ const themes: Record<string, Theme> = {
     glass: false,
     accent: '#ff8c42',
     effectClass: 'fx-hearth',
-    premium: true,
+    premium: false,
   },
   'carbon-grain': {
     id: 'carbon-grain',
@@ -426,7 +426,7 @@ const themes: Record<string, Theme> = {
     tokens: { str: '#b6c294', num: '#d4a373', key: '#a8b7d0', boo: '#d4a373' },
     glass: false,
     effectClass: 'fx-grain',
-    premium: true,
+    premium: false,
   },
   'crt-phosphor': {
     id: 'crt-phosphor',
@@ -453,7 +453,7 @@ const themes: Record<string, Theme> = {
     tokens: { str: '#b8ee88', num: '#ffe066', key: '#a8eecc', boo: '#ffe066' },
     glass: false,
     effectClass: 'fx-crt',
-    premium: true,
+    premium: false,
   },
   'aurora-drift': {
     id: 'aurora-drift',
@@ -480,7 +480,7 @@ const themes: Record<string, Theme> = {
     tokens: { str: '#9ccfd8', num: '#f6c177', key: '#8cb4e0', boo: '#eb6f92' },
     glass: false,
     effectClass: 'fx-aurora',
-    premium: true,
+    premium: false,
   },
 };
 

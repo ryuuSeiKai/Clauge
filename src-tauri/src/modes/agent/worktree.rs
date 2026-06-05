@@ -26,10 +26,26 @@ pub fn agent_create_worktree(project_path: String, branch_name: String) -> Resul
     if worktree_dir.exists() { return Ok(worktree_path); }
     let _ = std::fs::create_dir_all(worktree_dir.parent().unwrap_or(&worktree_dir));
     let _ = std::process::Command::new("git").args(["-C", &project_path, "worktree", "prune"]).output();
+
+    // Auto-stash dirty changes before `git worktree add` (which refuses
+    // to run on a dirty working tree), then immediately pop after.
+    let stashed = std::process::Command::new("git")
+        .args(["-C", &project_path, "stash", "push", "-m", "synapse-auto-stash"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
     let output = std::process::Command::new("git").args(["-C", &project_path, "worktree", "add", "-b", &branch_name, &worktree_path]).output().map_err(|e| format!("git worktree add failed: {}", e))?;
     if !output.status.success() {
         let output2 = std::process::Command::new("git").args(["-C", &project_path, "worktree", "add", &worktree_path, &branch_name]).output().map_err(|e| format!("git worktree add failed: {}", e))?;
         if !output2.status.success() { return Err(format!("git worktree add failed: {}", String::from_utf8_lossy(&output2.stderr))); }
+    }
+
+    // Restore original working tree state
+    if stashed {
+        let _ = std::process::Command::new("git")
+            .args(["-C", &project_path, "stash", "pop"])
+            .output();
     }
     let gitignore = PathBuf::from(&project_path).join(".gitignore");
     if let Ok(contents) = std::fs::read_to_string(&gitignore) {

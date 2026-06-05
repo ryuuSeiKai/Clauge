@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Clauge",
+  "productName": "Synapse",
   "version": "3.0.2",
-  "identifier": "com.clauge.desktop",
+  "identifier": "com.synapse.desktop",
   "build": {
     "frontendDist": "../build",
     "devUrl": "http://localhost:5173",
@@ -13,7 +13,7 @@
     "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "Clauge",
+        "title": "Synapse",
         "width": 1280,
         "height": 800,
         "minWidth": 900,

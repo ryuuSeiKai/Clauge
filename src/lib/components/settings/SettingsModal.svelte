@@ -447,7 +447,7 @@
     let aiTopTab = $state<"clauge" | "byok">("clauge");
     let aiSubTab = $state<"config" | "usage">("config");
 
-    // Clauge AI usage history — fetched from /api/ai/usage via cloud_ai_usage.
+    // Synapse AI usage history — fetched from /api/ai/usage via cloud_ai_usage.
     // Worker returns the most recent entries first; we render the last ~30.
     type CloudAiUsageEntry = {
         occurred_at: string;
@@ -622,7 +622,7 @@
         ),
     );
 
-    // --- Clauge AI balance (worker-tracked managed-AI credits) ---
+    // --- Synapse AI balance (worker-tracked managed-AI credits) ---
     let cloudCreditsLocal = $state<{
         remaining: number;
         allowance: number;
@@ -847,36 +847,9 @@
         }
     }
 
-    // Theme preview state for free users. When non-null, a pro theme is
-    // being previewed DOM-only (not persisted). previewOriginalTheme is
-    // the saved theme we revert to on cancel / close / tab-leave.
-    let previewThemeId = $state<string | null>(null);
-    let previewOriginalTheme = $state<string | null>(null);
-
-    // What the picker should highlight as active — the previewed theme
-    // if one is being tried, else the actually-saved theme.
-    let displayTheme = $derived(previewThemeId ?? currentTheme);
+    let displayTheme = $derived(currentTheme);
 
     async function handleThemeChange(themeId: string) {
-        const themeDef = getTheme(themeId);
-        const isPremium = !!themeDef?.premium;
-        const isFreeUser = $cloudPlan !== "pro";
-
-        if (isPremium && isFreeUser) {
-            // Enter / swap preview mode. Apply DOM-only — do NOT persist.
-            if (previewOriginalTheme === null) {
-                previewOriginalTheme = currentTheme;
-            }
-            previewThemeId = themeId;
-            applyTheme(themeId, accentColor);
-            return;
-        }
-
-        // Non-premium pick OR pro user: drop any active preview and persist.
-        if (previewThemeId !== null) {
-            previewThemeId = null;
-            previewOriginalTheme = null;
-        }
         applyTheme(themeId, accentColor);
         const config: AppearanceConfig = {
             theme: themeId,
@@ -885,50 +858,6 @@
         appearance.set(config);
         await saveAppearance(config);
     }
-
-    // User clicked Cancel in the preview banner — revert to their saved
-    // theme and exit preview.
-    function cancelThemePreview() {
-        if (previewOriginalTheme === null) return;
-        applyTheme(previewOriginalTheme, accentColor);
-        previewThemeId = null;
-        previewOriginalTheme = null;
-    }
-
-    // User clicked Upgrade in the preview banner — open the upgrade
-    // modal. The plan-flip $effect below handles auto-finalize if the
-    // upgrade succeeds; if they dismiss the modal we keep the preview
-    // active so they can see it and choose Cancel.
-    function upgradeFromThemePreview() {
-        upgradeModalOpen.set(true);
-    }
-
-    // Auto-revert preview when the user navigates away from Appearance or
-    // closes the Settings modal entirely — otherwise they'd return to a
-    // pro theme they never actually own.
-    $effect(() => {
-        if (previewThemeId === null) return;
-        if (!show || activeTab !== "appearance") {
-            cancelThemePreview();
-        }
-    });
-
-    // If the user successfully upgrades while a preview is showing, save
-    // the previewed theme as their real choice and exit preview mode.
-    $effect(() => {
-        if (previewThemeId === null) return;
-        if ($cloudPlan === "pro") {
-            const themeId = previewThemeId;
-            previewThemeId = null;
-            previewOriginalTheme = null;
-            const config: AppearanceConfig = {
-                theme: themeId,
-                accentColor: accentColor,
-            };
-            appearance.set(config);
-            saveAppearance(config).catch(() => {});
-        }
-    });
 
     async function handleAccentChange(color: string) {
         document.documentElement.style.setProperty("--acc", color);
@@ -1023,9 +952,51 @@
         return n.toString();
     }
 
-    function estimateCost(inputTokens: number, outputTokens: number): string {
+    // Model pricing: [input $/MTok, output $/MTok]
+    const MODEL_PRICES: Record<string, [number, number]> = {
+        "claude-haiku-4-5-20251001": [0.80, 4.00],
+        "claude-sonnet-4-6-20250514": [3.00, 15.00],
+        "claude-opus-4-7-20250514": [15.00, 75.00],
+        "gpt-4.1-mini": [0.40, 1.60],
+        "gpt-4.1": [2.00, 8.00],
+        "gpt-4o": [2.50, 10.00],
+        "mistral-large-latest": [2.00, 6.00],
+        "mistral-small-latest": [0.20, 0.60],
+        "gemini-3.1-flash-lite": [0.075, 0.30],
+        "llama-3.3-70b-versatile": [0.59, 0.79],
+        "meta-llama/llama-3.3-70b-instruct:free": [0, 0],
+        "meta-llama/llama-4-scout-17b-16e-instruct": [0, 0],
+        "nvidia/nemotron-3-super-120b-a12b": [0, 0],
+        "qwen/qwen3-32b": [0, 0],
+    };
+
+    function getModelPricing(model: string): [number, number] {
+        // Exact match
+        const exact = MODEL_PRICES[model];
+        if (exact) return exact;
+        // Substring match for providers like OpenRouter
+        const lower = model.toLowerCase();
+        if (lower.includes("deepseek")) return [0.27, 1.10];
+        if (lower.includes("gpt-4")) return [2.00, 8.00];
+        if (lower.includes("claude-haiku") || lower.includes("claude-3-haiku")) return [0.80, 4.00];
+        if (lower.includes("claude-sonnet") || lower.includes("claude-3-sonnet")) return [3.00, 15.00];
+        if (lower.includes("claude-opus")) return [15.00, 75.00];
+        if (lower.includes("gemini")) return [0.075, 0.30];
+        if (lower.includes("mistral-large")) return [2.00, 6.00];
+        if (lower.includes("mistral")) return [0.20, 0.60];
+        if (lower.includes("llama")) return [0.59, 0.79];
+        if (lower.includes("qwen")) return [0.50, 1.50];
+        // Default conservative estimate
+        return [0.50, 1.50];
+    }
+
+    function estimateCost(inputTokens: number, outputTokens: number, model?: string): string {
+        let inpPrice = 0.50, outPrice = 1.50;
+        if (model) {
+            [inpPrice, outPrice] = getModelPricing(model);
+        }
         const cost =
-            (inputTokens / 1_000_000) * 1.0 + (outputTokens / 1_000_000) * 5.0;
+            (inputTokens / 1_000_000) * inpPrice + (outputTokens / 1_000_000) * outPrice;
         if (cost < 0.01) return "<$0.01";
         return "$" + cost.toFixed(2);
     }
@@ -1792,7 +1763,7 @@
                                 <div class="stg-card-titles">
                                     <h3 class="stg-card-title">Privacy</h3>
                                     <p class="stg-card-sub">
-                                        Help improve Clauge with anonymous usage
+                                        Help improve Synapse with anonymous usage
                                         data.
                                     </p>
                                 </div>
@@ -2136,39 +2107,6 @@
                             {/each}
                         </div>
 
-                        {#if previewThemeId}
-                            {@const previewName =
-                                getTheme(previewThemeId)?.name ?? "Theme"}
-                            <div class="theme-preview-banner" role="alert">
-                                <div class="theme-preview-info">
-                                    <span class="theme-preview-eyebrow"
-                                        >PREVIEWING</span
-                                    >
-                                    <strong class="theme-preview-name"
-                                        >{previewName}</strong
-                                    >
-                                    <p class="theme-preview-sub">
-                                        This is a premium theme. Upgrade to keep
-                                        it, or cancel to go back to your current
-                                        theme.
-                                    </p>
-                                </div>
-                                <div class="theme-preview-actions">
-                                    <button
-                                        class="theme-preview-btn"
-                                        onclick={cancelThemePreview}
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        class="theme-preview-btn theme-preview-btn-primary"
-                                        onclick={upgradeFromThemePreview}
-                                    >
-                                        Upgrade to Pro
-                                    </button>
-                                </div>
-                            </div>
-                        {/if}
                     </div>
 
                     <div class="stg-section">
@@ -2219,7 +2157,7 @@
                         </div>
                     </div>
                 {:else if activeTab === "ai"}
-                    <!-- Top-level split: Clauge AI (managed credits + history)
+                    <!-- Top-level split: Synapse AI (managed credits + history)
                          vs BYOK (your own keys + per-mode/per-model stats). -->
                     <div class="ai-toptabs">
                         <button
@@ -2227,7 +2165,7 @@
                             class:active={aiTopTab === "clauge"}
                             onclick={() => (aiTopTab = "clauge")}
                         >
-                            Clauge AI
+                            Synapse AI
                         </button>
                         <button
                             class="ai-toptab"
@@ -2465,8 +2403,8 @@
                                         <p class="cai2-empty">Loading…</p>
                                     {:else if cloudAiUsage.length === 0}
                                         <p class="cai2-empty">
-                                            No Clauge AI requests yet. Start
-                                            chatting from any mode with Clauge
+                                            No Synapse AI requests yet. Start
+                                            chatting from any mode with Synapse
                                             AI selected in the panel.
                                         </p>
                                     {:else}
@@ -3350,14 +3288,16 @@
                                                                 >{estimateCost(
                                                                     pstat.inputTokens,
                                                                     pstat.outputTokens,
+                                                                    pstat.model,
                                                                 )}</span
                                                             >
                                                         </div>
                                                     {/each}
                                                 </div>
                                                 <p class="ai-pricing-note">
-                                                    Haiku 4.5: $1.00 / MTok in
-                                                    &middot; $5.00 / MTok out
+                                                    Costs estimated per-model
+                                                    (default: $0.50 / MTok in
+                                                    &middot; $1.50 / MTok out)
                                                 </p>
                                             </div>
                                         </section>
@@ -5184,7 +5124,7 @@
                     <div class="stg-card-stack stg-about">
                         <section class="stg-card stg-card-bare about-identity">
                             <div class="about-header">
-                                <span class="about-app-name">Clauge</span>
+                                <span class="about-app-name">Synapse</span>
                                 <span class="about-version"
                                     >v{appVersion || "—"}</span
                                 >
@@ -5219,7 +5159,7 @@
                                 <div class="stg-card-titles">
                                     <h3 class="stg-card-title">Tech Stack</h3>
                                     <p class="stg-card-sub">
-                                        What Clauge is built on.
+                                        What Synapse is built on.
                                     </p>
                                 </div>
                             </header>

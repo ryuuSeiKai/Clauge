@@ -107,7 +107,7 @@
                     </svg>
                 </div>
 
-                <h2 id="welcome-pro-title" class="title">Welcome to Clauge Pro</h2>
+                <h2 id="welcome-pro-title" class="title">Welcome to Synapse Pro</h2>
 
                 {#if tierLabel}
                     <span class="tier-pill">{tierLabel}</span>

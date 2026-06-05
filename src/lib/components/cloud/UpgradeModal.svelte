@@ -20,7 +20,7 @@
         if (lower.includes("unauthorized") || lower.includes("401"))
             return "Your session expired. Please sign in again.";
         if (lower.includes("network") || lower.includes("failed to fetch"))
-            return "Couldn't reach the Clauge cloud. Check your internet and try again.";
+            return "Couldn't reach the Synapse cloud. Check your internet and try again.";
         if (stage === "checkout") {
             if (lower.includes("invalid plan"))
                 return "That plan isn't available right now.";
@@ -223,7 +223,7 @@
                         </div>
                         <h2 class="signin-title">Sign in to continue</h2>
                         <p class="signin-sub">
-                            A Clauge account keeps your subscription, sync, and
+                            A Synapse account keeps your subscription, sync, and
                             preferences tied to you across devices. It only
                             takes a moment.
                         </p>
@@ -295,7 +295,7 @@
                             </svg>
                             Pro plan
                         </span>
-                        <h2 class="upm-title">Upgrade to Clauge Pro</h2>
+                        <h2 class="upm-title">Upgrade to Synapse Pro</h2>
                         <p class="upm-tag">Everything you need, unlocked.</p>
                     </header>
 
@@ -314,7 +314,7 @@
                                     d="M12 2l2 5 5 2-5 2-2 5-2-5-5-2 5-2 2-5z"
                                 />
                             </svg>
-                            <span>Clauge AI</span>
+                            <span>Synapse AI</span>
                         </div>
                         <div class="upm-feat">
                             <svg
