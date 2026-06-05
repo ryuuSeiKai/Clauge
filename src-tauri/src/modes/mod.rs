@@ -7,3 +7,4 @@ pub mod rest;
 pub mod agent;
 pub mod explorer;
 pub mod workspace;
+pub mod editor;
