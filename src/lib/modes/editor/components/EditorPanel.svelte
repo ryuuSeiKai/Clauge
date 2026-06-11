@@ -153,28 +153,22 @@
     }
   });
 
-  // Destroy the native webview when leaving the Editor tab — hide()
-  // is unreliable across platforms. Recreate when coming back.
+
+
+  // Keep the native webview alive when leaving the Editor tab — hide it
+  // and show it again when coming back, to preserve editor state.
   let wasEditor = $state(false);
-  let reentering = false;
   $effect(() => {
     if ($mode === 'editor') {
-      if (!wasEditor && initialized && !reentering) {
-        reentering = true;
-        ro?.disconnect();
-        ro = null;
-        loading = true;
-        error = null;
-        initEditor().finally(() => reentering = false);
+      if (!wasEditor && initialized) {
+        webviewObj?.show().catch(() => {});
+        webviewObj?.setFocus().catch(() => {});
       }
       wasEditor = true;
     } else {
       if (wasEditor) {
         wasEditor = false;
-        webviewObj?.close().catch(() => {});
-        webviewObj = null;
-        ro?.disconnect();
-        ro = null;
+        webviewObj?.hide().catch(() => {});
       }
     }
   });
