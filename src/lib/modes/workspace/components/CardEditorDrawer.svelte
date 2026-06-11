@@ -133,7 +133,7 @@
   // Default 720px (was 600). User-draggable left edge sets a custom
   // width that survives reload via localStorage. Min 480 (avatars +
   // input still fit), max 1100 (don't eat the entire window).
-  const DRAWER_WIDTH_KEY = 'clauge.workspace.drawer.width';
+  const DRAWER_WIDTH_KEY = 'Synape.workspace.drawer.width';
   const DRAWER_MIN = 480;
   const DRAWER_MAX = 1100;
   function loadWidth(): number {

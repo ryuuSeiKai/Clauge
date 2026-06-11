@@ -4,6 +4,7 @@
   import { Terminal } from '@xterm/xterm';
   import { FitAddon } from '@xterm/addon-fit';
   import { SearchAddon } from '@xterm/addon-search';
+  import { Unicode11Addon } from '@xterm/addon-unicode11';
   import '@xterm/xterm/css/xterm.css';
   import { Channel } from '@tauri-apps/api/core';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -27,6 +28,7 @@
     agentSpawnShell,
     agentWriteToTerminal,
     agentResizeTerminal,
+    agentOpenNativeTerminal,
     agentUpdateSessionId,
     agentUpdateLastUsed,
     agentDiscoverSessions,
@@ -51,7 +53,8 @@
   import { errorToast, friendlyError } from '$lib/utils/errors';
   import { refreshAgentGitStatus, refreshAgentContextUsage, loadAgentSessions, agentGitBranchName, agentGitFiles, agentGitAhead, agentGitBehind } from '../stores';
   import { getTerminalTheme } from '$lib/utils/theme';
-  import { appearance } from '$lib/stores/settings';
+  import { appearance, settings } from '$lib/stores/settings';
+  let useNativeTerminal = $derived(($settings["agent.use_native_terminal"] ?? "false") === "true");
   import { base64ToBytes, deferUntilFrame, loadWebGLAddon } from '$lib/shared/primitives/terminal-utils';
   import { getPurposePrompt } from '../ai/prompt';
   import { AGENT_EVENT } from '$lib/shared/constants/events';
@@ -364,10 +367,9 @@
       fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", "Menlo", monospace',
       theme: getCurrentTermTheme(),
       allowTransparency: true,
+      allowProposedApi: true,
       scrollback: 10000,
       lineHeight: 1.35,
-      smoothScrollDuration: 100,
-      rescaleOverlappingGlyphs: true,
       cursorStyle: 'bar',
       cursorInactiveStyle: 'outline',
       rightClickSelectsWord: true,
@@ -376,6 +378,7 @@
     const sa = new SearchAddon();
     t.loadAddon(fa);
     t.loadAddon(sa);
+    t.loadAddon(new Unicode11Addon());
 
     const container = document.createElement('div');
     container.style.cssText = 'width:100%;height:100%;display:none;';
@@ -482,10 +485,9 @@
       fontSize: 13,
       fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", "SF Mono", "Menlo", monospace',
       theme: getCurrentTermTheme(),
+      allowProposedApi: true,
       scrollback: 5000,
       lineHeight: 1.35,
-      smoothScrollDuration: 100,
-      rescaleOverlappingGlyphs: true,
       cursorStyle: 'bar',
       cursorInactiveStyle: 'outline',
       rightClickSelectsWord: true,
@@ -494,6 +496,7 @@
     const sa = new SearchAddon();
     t.loadAddon(fa);
     t.loadAddon(sa);
+    t.loadAddon(new Unicode11Addon());
 
     const container = document.createElement('div');
     container.style.cssText = 'width:100%;height:100%;display:none;';
@@ -810,6 +813,29 @@
       agentTerminalMap.update(m => { m.delete(session.id); return new Map(m); });
     }
 
+    // When native terminal is enabled, skip the embedded xterm entirely
+    // and open macOS Terminal.app / iTerm2. Bypasses WKWebView IME bugs.
+    let spawnPath: string = session.worktreePath || session.projectPath;
+    if (useNativeTerminal) {
+      spawning = true;
+      try {
+        await agentOpenNativeTerminal({
+          projectPath: spawnPath,
+          provider: session.provider || 'claude',
+          sessionId: session.claudeSessionId,
+          skipPermissions: session.skipPermissions === 1,
+          binaryPath: session.binaryPath,
+        });
+        termReady = true;
+      } catch(e) {
+        console.error('Native terminal failed:', e);
+      } finally {
+        spawning = false;
+        _spawnLock = false;
+      }
+      return;
+    }
+
     termReady = false;
     spawning = true;
     _spawnLock = true;
@@ -819,7 +845,6 @@
     // Hoisted outside the try so the catch can release the per-cwd
     // capture lock on spawn failure. Reassigned inside the try with
     // the real values once spawnPath / captureDone are known.
-    let spawnPath: string = session.worktreePath || session.projectPath;
     let captureResolver: () => void = () => {};
     let captureDone: Promise<void> | null = null;
 
@@ -858,7 +883,7 @@
             const uuidShort = session.id.replace(/-/g, '').slice(0, 8);
             const titleSlug = session.title.toLowerCase().replace(/\s+/g, '-');
             const purposeSlug = session.purpose.toLowerCase().replace(/\s+/g, '-');
-            const rawBranch = `clauge/${purposeSlug}-${titleSlug}-${uuidShort}`;
+            const rawBranch = `Synape/${purposeSlug}-${titleSlug}-${uuidShort}`;
             const branchName = rawBranch.replace(/[^a-zA-Z0-9/_\-.]/g, '').replace(/\.{2,}/g, '.').replace(/\.lock/g, '');
             const worktreePath = await agentCreateWorktree(session.projectPath, branchName);
             spawnPath = worktreePath;
@@ -1114,7 +1139,7 @@
         }
       };
 
-      // Flatten prompt to single line for shell compatibility (matches original Clauge)
+      // Flatten prompt to single line for shell compatibility (matches original Synape)
       // Use frontend purpose prompt for fixed purposes, fall back to stored prompt for Custom
       const rawPrompt = getPurposePrompt(session.purpose) || session.contextPrompt || '';
       const purposePrompt = rawPrompt.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -1595,7 +1620,8 @@
     <div class="agent-terminal-main" style="width:{$agentShellOpen ? mainWidth + '%' : '100%'}">
       {#if spawning}
         {@const _prov = $activeAgentSession?.provider ?? 'claude'}
-        {@const _src = _prov === 'codex' ? '/codex.svg'
+        {@const _src = _prov === 'antigravity' ? '/antigravity.png'
+                     : _prov === 'codex' ? '/codex.svg'
                      : _prov === 'gemini' ? '/gemini.svg'
                      : _prov === 'opencode' ? '/opencode-dark.svg'
                      : '/code-in-action.svg'}
@@ -1616,6 +1642,26 @@
           <span class="ended-dot"></span>
           <span class="ended-text">Session ended</span>
           <button class="ended-btn" type="button" onclick={startNewForActiveSession}>Start new</button>
+          <button class="ended-btn native-term-btn" type="button" onclick={() => {
+            const s = $activeAgentSession;
+            agentOpenNativeTerminal({
+              projectPath: s?.projectPath || '',
+              provider: s?.provider || 'claude',
+              binaryPath: s?.binaryPath,
+            }).catch(() => {});
+          }}>Open in Terminal</button>
+        </div>
+      {/if}
+      {#if !_isExited && !spawning}
+        <div class="agent-native-term-bar">
+          <label class="native-term-toggle" title="Open CLI sessions in Terminal.app instead of embedded xterm (fixes Vietnamese IME)">
+            <input
+              type="checkbox"
+              checked={useNativeTerminal}
+              onchange={(e) => setSetting("agent.use_native_terminal", String(e.currentTarget.checked))}
+            />
+            <span>Native Terminal</span>
+          </label>
         </div>
       {/if}
       {#if termFindOpen}
@@ -2060,4 +2106,12 @@
     font-family: var(--ui);
     margin: 0;
   }
+  .agent-native-term-bar { position: absolute; top: 8px; right: 12px; z-index: 3; }
+  .native-term-toggle {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 6px;
+    background: var(--b1); font-size: 11px; font-family: var(--ui);
+    color: var(--t2); cursor: default; user-select: none;
+  }
+  .native-term-toggle input { cursor: default; }
 </style>

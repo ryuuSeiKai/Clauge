@@ -1,7 +1,7 @@
 # VS Code Embedded Tab — Design Spec
 
 **Date:** 2026-06-03
-**Project:** Synapse (formerly Clauge)
+**Project:** Synapse (formerly Synape)
 **Status:** Approved design
 
 ## Overview

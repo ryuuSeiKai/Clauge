@@ -3,10 +3,10 @@ use sqlx::SqlitePool;
 /// Aggregated stat row: (group_key, total_calls, input_tokens, output_tokens, total_tool_rounds, max_tool_rounds).
 pub type UsageStatRow = (String, i64, i64, i64, i64, i64);
 
-// Both per-mode and per-model BYOK stats exclude `clauge-managed` rows.
-// Clauge AI usage is tracked centrally by the worker and surfaced in the
-// dedicated Clauge AI tab; recording it here too would double-count.
-// Historical rows written before the recordAiUsage skip-clauge fix
+// Both per-mode and per-model BYOK stats exclude `Synape-managed` rows.
+// Synape AI usage is tracked centrally by the worker and surfaced in the
+// dedicated Synape AI tab; recording it here too would double-count.
+// Historical rows written before the recordAiUsage skip-Synape fix
 // still live in the local table, so we filter at query time too — no
 // manual DB cleanup required.
 pub async fn stats_by_mode(pool: &SqlitePool) -> Result<Vec<UsageStatRow>, sqlx::Error> {
@@ -17,7 +17,7 @@ pub async fn stats_by_mode(pool: &SqlitePool) -> Result<Vec<UsageStatRow>, sqlx:
                 COALESCE(SUM(tool_rounds), 0),
                 COALESCE(MAX(tool_rounds), 0)
            FROM ai_usage
-          WHERE model != 'clauge-managed'
+          WHERE model != 'Synape-managed'
           GROUP BY mode"
     )
     .fetch_all(pool)
@@ -32,7 +32,7 @@ pub async fn stats_by_model(pool: &SqlitePool) -> Result<Vec<UsageStatRow>, sqlx
                 COALESCE(SUM(tool_rounds), 0),
                 COALESCE(MAX(tool_rounds), 0)
            FROM ai_usage
-          WHERE model != 'clauge-managed'
+          WHERE model != 'Synape-managed'
           GROUP BY model"
     )
     .fetch_all(pool)

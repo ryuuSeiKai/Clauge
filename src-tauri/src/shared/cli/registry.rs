@@ -6,6 +6,7 @@
 // instead of failing loudly. New code paths that genuinely need to
 // reject unknown providers should call `try_runner_for` instead.
 
+use super::antigravity::ANTIGRAVITY;
 use super::claude::CLAUDE;
 use super::codex::CODEX;
 use super::gemini::GEMINI;
@@ -15,6 +16,7 @@ use super::runner::CliRunner;
 /// Map a provider id to its runner. Unknown ids → Claude (safe default).
 pub fn runner_for(provider: &str) -> &'static dyn CliRunner {
     match provider {
+        "antigravity" => &ANTIGRAVITY,
         "codex" => &CODEX,
         "gemini" => &GEMINI,
         "opencode" => &OPENCODE,
@@ -27,6 +29,7 @@ pub fn runner_for(provider: &str) -> &'static dyn CliRunner {
 /// default catch-all.
 pub fn try_runner_for(provider: &str) -> Option<&'static dyn CliRunner> {
     match provider {
+        "antigravity" => Some(&ANTIGRAVITY),
         "claude" => Some(&CLAUDE),
         "codex" => Some(&CODEX),
         "gemini" => Some(&GEMINI),
@@ -35,7 +38,7 @@ pub fn try_runner_for(provider: &str) -> Option<&'static dyn CliRunner> {
     }
 }
 
-/// All providers Clauge currently supports, in display order. Drives
+/// All providers Synape currently supports, in display order. Drives
 /// the provider tab strip in the plugin manager and the picker in
 /// NewSessionModal. Keep Claude first so it stays the obvious default.
-pub const SUPPORTED_PROVIDERS: &[&str] = &["claude", "codex", "gemini", "opencode"];
+pub const SUPPORTED_PROVIDERS: &[&str] = &["claude", "antigravity", "codex", "gemini", "opencode"];

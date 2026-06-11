@@ -28,8 +28,8 @@ use super::credential_store::CredentialStore;
 
 const FILE_MAGIC: &[u8; 4] = b"CLG1";
 const FILE_VERSION: u8 = 1;
-const HKDF_SALT: &[u8] = b"Clauge-LinuxFileStore-v1";
-const HKDF_INFO: &[u8] = b"clauge.credentials";
+const HKDF_SALT: &[u8] = b"Synape-LinuxFileStore-v1";
+const HKDF_INFO: &[u8] = b"Synape.credentials";
 const NONCE_LEN: usize = 12;
 
 pub struct LinuxFileStore {
@@ -203,7 +203,7 @@ fn credentials_path() -> PathBuf {
             })
         })
         .unwrap_or_else(|| PathBuf::from("/tmp"));
-    base.join("clauge").join("credentials.bin")
+    base.join("Synape").join("credentials.bin")
 }
 
 fn read_machine_id() -> Option<String> {
@@ -224,7 +224,7 @@ fn fallback_ikm() -> String {
     let home = std::env::var("HOME").unwrap_or_default();
     let user = std::env::var("USER").unwrap_or_default();
     let host = hostname_best_effort();
-    format!("clauge:{}:{}:{}", host, user, home)
+    format!("Synape:{}:{}:{}", host, user, home)
 }
 
 fn hostname_best_effort() -> String {
@@ -257,7 +257,7 @@ mod tests {
         fn new(label: &str) -> Self {
             let n = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
-                "clauge-linux-file-store-{}-{}-{}",
+                "Synape-linux-file-store-{}-{}-{}",
                 std::process::id(),
                 label,
                 n

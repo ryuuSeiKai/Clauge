@@ -34,6 +34,16 @@
             e as CustomEvent<{ provider: "github" | "google"; code: string }>
         ).detail;
         if (!detail?.code || !detail?.provider) return;
+
+        // Server-side exchange already handled it — just refresh status.
+        if (detail.code === '__done__') {
+            const { cloudGetStatus } = await import("$lib/commands/cloud");
+            const { setConnected } = await import("$lib/stores/cloud");
+            const status = await cloudGetStatus();
+            if (status.user) setConnected(status.user, status.providers, status.activeProvider, status.plan);
+            return;
+        }
+
         ghConnecting = true;
         try {
             const { cloudExchangeCode, cloudCheckRemoteExists } =
@@ -131,18 +141,34 @@
     async function handleConnect(provider: "github" | "google") {
         ghConnecting = true;
         try {
-            const { cloudGithubLoginUrl, cloudGoogleLoginUrl } =
+            const { cloudCreateTicket, cloudGithubLoginUrl, cloudGoogleLoginUrl, cloudPollTicket, cloudExchangeCode } =
                 await import("$lib/commands/cloud");
+            const ticket = await cloudCreateTicket();
             const url =
                 provider === "github"
-                    ? await cloudGithubLoginUrl()
-                    : await cloudGoogleLoginUrl();
+                    ? await cloudGithubLoginUrl(ticket)
+                    : await cloudGoogleLoginUrl(ticket);
             try {
                 const { openUrl } = await import("@tauri-apps/plugin-opener");
                 await openUrl(url);
             } catch {
                 window.open(url, "_blank");
             }
+            // Poll for ticket result (no deep-link needed).
+            (async () => {
+                const { setConnected } = await import("$lib/stores/cloud");
+                for (let i = 0; i < 30; i++) {
+                    await new Promise((r) => setTimeout(r, 2000));
+                    const result = await cloudPollTicket(ticket).catch(() => ({ status: "pending" }));
+                    if (result.status === "ready") {
+                        const status = await cloudExchangeCode(provider, result.token!);
+                        if (status.user) {
+                            setConnected(status.user, status.providers, status.activeProvider, status.plan);
+                        }
+                        return;
+                    }
+                }
+            })();
         } catch (e: any) {
             ghConnecting = false;
             const { showToast } = await import("$lib/shared/primitives/toast");
@@ -191,7 +217,7 @@
 
         <div class="ob-card">
             <img
-                src="/clauge-icon-animated.svg"
+                src="/Synape-icon-animated.svg"
                 alt="Synapse"
                 class="ob-logo"
                 width="72"
@@ -263,13 +289,13 @@
                     <p class="ob-legal">
                         By signing in, you agree to our
                         <a
-                            href="https://clauge.in/terms"
+                            href="https://Synape.in/terms"
                             target="_blank"
                             rel="noopener noreferrer">Terms of Service</a
                         >
                         and
                         <a
-                            href="https://clauge.in/privacy"
+                            href="https://Synape.in/privacy"
                             target="_blank"
                             rel="noopener noreferrer">Privacy Policy</a
                         >.

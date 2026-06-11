@@ -23,7 +23,7 @@ const MAX_PERSIST_BYTES: usize = 5 * 1024 * 1024;
 /// strings would corrupt them, the viewer can't render them anyway,
 /// and they bloat the DB.
 ///
-/// Parses BOTH header serialisation shapes Clauge has used:
+/// Parses BOTH header serialisation shapes Synape has used:
 ///   • Tuple array:  `[["Content-Type","application/pdf"], ...]`
 ///     — the response-headers path uses `Vec<(String, String)>`.
 ///   • Object array: `[{"key":"Content-Type","value":"..."}, ...]`

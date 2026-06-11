@@ -1,29 +1,29 @@
 // Centralized localStorage keys + thin typed accessors.
-// All app-level keys follow the `clauge_*` convention.
+// All app-level keys follow the `Synape_*` convention.
 //
 // When adding a new key:
 //   1. Add it to STORAGE_KEYS below.
 //   2. If you want a typed accessor, add a `get*`/`set*` helper.
-//   3. Never inline `localStorage.getItem('clauge_…')` in components.
+//   3. Never inline `localStorage.getItem('Synape_…')` in components.
 
 export const STORAGE_KEYS = {
-  ACTIVE_ENV_ID: 'clauge_active_env_id',
-  AI_CHAT_HISTORY: 'clauge_ai_chat_history',
-  AI_PANEL_WIDTH: 'clauge_ai_panel_width',
-  GITHUB_AVATAR: 'clauge_github_avatar',
-  HAS_SYNCED: 'clauge_has_synced',
-  LAST_MODE: 'clauge_last_mode',
-  LAST_SEEN_VERSION: 'clauge_last_seen_version',
-  LAST_SYNCED_AT: 'clauge_last_synced_at',
-  NAV_PINNED: 'clauge_nav_pinned',
-  REQUEST_ENV_OVERRIDES: 'clauge_request_env_overrides',
-  SQL_ROW_LIMIT: 'clauge_sql_row_limit',
-  SSH_AUTO_RUN: 'clauge_ssh_auto_run',
+  ACTIVE_ENV_ID: 'Synape_active_env_id',
+  AI_CHAT_HISTORY: 'Synape_ai_chat_history',
+  AI_PANEL_WIDTH: 'Synape_ai_panel_width',
+  GITHUB_AVATAR: 'Synape_github_avatar',
+  HAS_SYNCED: 'Synape_has_synced',
+  LAST_MODE: 'Synape_last_mode',
+  LAST_SEEN_VERSION: 'Synape_last_seen_version',
+  LAST_SYNCED_AT: 'Synape_last_synced_at',
+  NAV_PINNED: 'Synape_nav_pinned',
+  REQUEST_ENV_OVERRIDES: 'Synape_request_env_overrides',
+  SQL_ROW_LIMIT: 'Synape_sql_row_limit',
+  SSH_AUTO_RUN: 'Synape_ssh_auto_run',
   // DEPRECATED — pre-release toggle removed; key is only kept here so the
   // one-shot migration in updater.ts (`localStorage.removeItem(...)`) can
   // reference it. Safe to delete from this map in the next release once
   // the migration has shipped to all existing users.
-  UPDATE_CHANNEL: 'clauge_update_channel',
+  UPDATE_CHANNEL: 'Synape_update_channel',
 } as const;
 
 // Legacy keys we migrate away from on first read.

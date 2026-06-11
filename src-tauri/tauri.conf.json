@@ -39,15 +39,15 @@
     ],
     "linux": {
       "deb": {
-        "desktopTemplate": "Clauge.desktop",
+        "desktopTemplate": "Synape.desktop",
         "files": {
-          "/usr/share/metainfo/com.clauge.desktop.metainfo.xml": "com.clauge.desktop.metainfo.xml"
+          "/usr/share/metainfo/com.Synape.desktop.metainfo.xml": "com.Synape.desktop.metainfo.xml"
         }
       },
       "rpm": {
-        "desktopTemplate": "Clauge.desktop",
+        "desktopTemplate": "Synape.desktop",
         "files": {
-          "/usr/share/metainfo/com.clauge.desktop.metainfo.xml": "com.clauge.desktop.metainfo.xml"
+          "/usr/share/metainfo/com.Synape.desktop.metainfo.xml": "com.Synape.desktop.metainfo.xml"
         }
       }
     }
@@ -55,13 +55,13 @@
   "plugins": {
     "updater": {
       "endpoints": [
-        "https://github.com/ansxuman/Clauge/releases/latest/download/latest.json"
+        "https://github.com/ansxuman/Synape/releases/latest/download/latest.json"
       ],
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxNTMyMTA3Nzc0NzA3NzUKUldSMUIwZDNCeUZUVVhEdkRHdk1qd0NmS2hybWZEWXYwQWxoVjh3STF5KzVkNzY1aTlxelgvMlQK"
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["clauge"]
+        "schemes": ["Synape"]
       }
     }
   }

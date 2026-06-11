@@ -90,7 +90,7 @@ pub async fn stream_anthropic(
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
         let response = client
-            .post(config.api_url)
+            .post(config.api_url.as_ref())
             .headers(headers)
             .json(&body)
             .send()

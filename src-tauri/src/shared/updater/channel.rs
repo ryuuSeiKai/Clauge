@@ -4,10 +4,10 @@ use serde::Deserialize;
 use sqlx::SqlitePool;
 
 const REPO_OWNER: &str = "ansxuman";
-const REPO_NAME: &str = "Clauge";
+const REPO_NAME: &str = "Synape";
 
 const STABLE_ENDPOINT: &str =
-    "https://github.com/ansxuman/Clauge/releases/latest/download/latest.json";
+    "https://github.com/ansxuman/Synape/releases/latest/download/latest.json";
 
 #[derive(Debug, Deserialize)]
 struct GhRelease {
@@ -52,7 +52,7 @@ async fn find_latest_prerelease(pool: &SqlitePool) -> Result<Option<String>, Str
     // GitHub API rejects requests without a User-Agent.
     let releases: Vec<GhRelease> = client
         .get(&url)
-        .header("User-Agent", "Clauge-Updater")
+        .header("User-Agent", "Synape-Updater")
         .header("Accept", "application/vnd.github+json")
         .send()
         .await

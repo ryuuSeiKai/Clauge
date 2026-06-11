@@ -2,9 +2,9 @@
 name = "app"
 version = "3.0.2"
 description = "Synapse — An AI-powered cross-platform desktop super-app for developers"
-authors = ["Anshuman <support@clauge.in>"]
+authors = ["Anshuman <support@Synape.in>"]
 license = "LicenseRef-PolyForm-Noncommercial-1.0.0"
-repository = "https://github.com/ansxuman/Clauge"
+repository = "https://github.com/ansxuman/Synape"
 edition = "2021"
 rust-version = "1.77.2"
 
@@ -20,7 +20,7 @@ serde_json = "1"
 serde = { version = "1", features = ["derive"] }
 log = { version = "0.4", features = ["std"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
-tauri = { version = "2", features = ["tray-icon", "macos-private-api"] }
+tauri = { version = "2", features = ["tray-icon", "macos-private-api", "unstable"] }
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-http = "2"
 reqwest = { version = "0.12", features = ["gzip", "brotli", "deflate", "json", "native-tls", "stream", "multipart"] }
@@ -87,7 +87,7 @@ toml_edit = "0.25.5"
 #   macOS   → shell-out to /usr/bin/security (implicitly trusted by Keychain,
 #             avoids re-signing prompts).
 #   Windows → `keyring` crate, Windows Credential Manager backend.
-#   Linux   → encrypted file at $XDG_DATA_HOME/clauge/credentials.bin
+#   Linux   → encrypted file at $XDG_DATA_HOME/Synape/credentials.bin
 #             (AES-256-GCM, key derived from /etc/machine-id via HKDF-SHA256).
 #             Secret Service / libsecret is intentionally NOT used: gnome-keyring
 #             pops a system "unlock with login password" dialog whenever the

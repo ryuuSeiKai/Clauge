@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "reasonix": {
+      "command": "node",
+      "args": ["/Users/ryuuvu/.config/reasonix/mcp-bridge/dist/index.js"]
+    }
+  }
+}

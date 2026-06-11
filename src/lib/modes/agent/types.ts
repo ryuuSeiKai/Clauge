@@ -27,9 +27,10 @@ export interface AgentSession {
 }
 
 /** Provider ids that map to a `CliRunner` in `runner_for`. */
-export type AgentProvider = 'claude' | 'codex' | 'gemini' | 'opencode';
+export type AgentProvider = 'claude' | 'antigravity' | 'codex' | 'gemini' | 'opencode';
 export const AGENT_PROVIDERS: { id: AgentProvider; label: string }[] = [
   { id: 'claude', label: 'Claude' },
+  { id: 'antigravity', label: 'Antigravity' },
   { id: 'codex', label: 'Codex' },
   { id: 'gemini', label: 'Gemini' },
   { id: 'opencode', label: 'OpenCode' },

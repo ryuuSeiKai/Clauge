@@ -17,7 +17,7 @@ pub fn run() {
     // are single-instance natively, so the plugin is gated to other OSes.
     // Must be registered FIRST — the plugin intercepts startup, brings the
     // running window to focus, and forwards deep-link URIs from the new
-    // attempt (e.g. clauge:// OAuth callbacks) to the existing process.
+    // attempt (e.g. Synape:// OAuth callbacks) to the existing process.
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     {
         builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -26,17 +26,17 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-            // Explicitly forward clauge:// URIs from the new launch to the
+            // Explicitly forward Synape:// URIs from the new launch to the
             // running deep-link plugin. The single-instance plugin's
             // deep-link cargo feature is supposed to do this automatically,
             // but the auto-forward can miss on Linux .deb installs (the
             // .desktop handoff produces a slightly different argv shape).
             // The frontend's centralized handler in +layout.svelte listens
-            // for this event via onOpenUrl() and dispatches clauge:oauth-callback.
+            // for this event via onOpenUrl() and dispatches Synape:oauth-callback.
             use tauri::Emitter;
             let uris: Vec<String> = args
                 .iter()
-                .filter(|a| a.starts_with("clauge://"))
+                .filter(|a| a.starts_with("Synape://"))
                 .cloned()
                 .collect();
             if !uris.is_empty() {
@@ -56,12 +56,12 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_http::init())
-        // tauri-plugin-sql is registered without migrations — the Clauge
-        // database lives in app_data_dir/clauge.db and its schema is
+        // tauri-plugin-sql is registered without migrations — the Synape
+        // database lives in app_data_dir/Synape.db and its schema is
         // managed end-to-end by `db::migrator` (see src-tauri/migrations/).
         // The plugin remains available for any frontend SQL access against
         // user-configured databases (Postgres/MySQL/Mongo via the SQL/NoSQL
-        // modes), but it does NOT touch the Clauge schema.
+        // modes), but it does NOT touch the Synape schema.
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             // Rolling file logger — per-day folder, per-hour file, 30-day retention.
@@ -85,7 +85,7 @@ pub fn run() {
             // ── Database setup ───────────────────────────────────────
             // 1. Open the SQLite pool.
             // 2. Run schema migrations (with bootstrap for legacy installs).
-            // 3. One-time import of pre-SQLite ~/.clauge/* data.
+            // 3. One-time import of pre-SQLite ~/.Synape/* data.
             //
             // All three steps are encapsulated under `db::*` so this
             // setup() block stays focused on plumbing.
@@ -96,7 +96,7 @@ pub fn run() {
 
             let pool = tauri::async_runtime::block_on(async {
                 db::pool::init(&app_data_dir).await
-            }).expect("failed to open Clauge database");
+            }).expect("failed to open Synape database");
 
             tauri::async_runtime::block_on(async {
                 db::migrator::run(&pool).await
@@ -105,6 +105,24 @@ pub fn run() {
             tauri::async_runtime::block_on(async {
                 db::legacy_import::run_if_needed(&pool).await;
             });
+
+            // Load saved API URL override (e.g. zrok tunnel) from settings DB.
+            {
+                let saved = tauri::async_runtime::block_on(async {
+                    sqlx::query_as::<_, (String,)>(
+                        "SELECT value FROM settings WHERE key = 'cloud:api_url'",
+                    )
+                    .fetch_optional(&pool)
+                    .await
+                    .ok()
+                    .flatten()
+                    .map(|r| r.0)
+                });
+                if let Some(url) = saved {
+                    cloud::config::set_api_url_override(Some(url));
+                    log::info!("[cloud] loaded API URL override from settings");
+                }
+            }
 
             // Load saved vibrancy material before managing pool (which moves it)
             let saved_material = tauri::async_runtime::block_on(async {
@@ -142,6 +160,7 @@ pub fn run() {
             app.manage(cloud::scheduler::Scheduler::default());
             // Single in-memory authority for Pro state. Hydrated below.
             app.manage(cloud::pro_state::ProStateManager::default());
+            app.manage(modes::editor::VscodeServer::new());
 
             // Load tokens from keyring (+ one-time migration from legacy
             // settings.github_token row). If a token resolves to a logged-in
@@ -214,7 +233,7 @@ pub fn run() {
 
                 let show_item = MenuItem::with_id(app, "show", "Back to App", true, None::<&str>)?;
                 let separator = PredefinedMenuItem::separator(app)?;
-                let quit_item = MenuItem::with_id(app, "quit", "Quit Clauge", true, None::<&str>)?;
+                let quit_item = MenuItem::with_id(app, "quit", "Quit Synape", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&show_item, &separator, &quit_item])?;
 
                 // tray-dark.png is a black silhouette designed to be used as a
@@ -236,7 +255,7 @@ pub fn run() {
                 let mut tray_builder = TrayIconBuilder::with_id("main-tray")
                     .icon(tray_icon)
                     .menu(&menu)
-                    .tooltip("Clauge");
+                    .tooltip("Synape");
 
                 // Template mode is a macOS-only concept — the system uses the
                 // alpha channel to render the icon in the right color for the
@@ -341,6 +360,10 @@ pub fn run() {
             cloud::commands::cloud_get_status,
             cloud::commands::cloud_github_login_url,
             cloud::commands::cloud_google_login_url,
+            cloud::commands::cloud_create_ticket,
+            cloud::commands::cloud_poll_ticket,
+            cloud::commands::cloud_set_api_url,
+            cloud::commands::cloud_get_api_url,
             cloud::commands::cloud_exchange_code,
             cloud::commands::cloud_link_provider,
             cloud::commands::cloud_unlink_provider,
@@ -366,7 +389,7 @@ pub fn run() {
             cloud::credentials_probe::cloud_probe_missing_credentials,
             modes::rest::import_export::export_collection,
             modes::rest::import_export::export_all_collections,
-            modes::rest::import_export::import_clauge,
+            modes::rest::import_export::import_Synape,
             modes::rest::import_export::import_postman,
             modes::rest::import_export::import_curl,
             modes::rest::import_export::export_as_curl,
@@ -445,6 +468,7 @@ pub fn run() {
             modes::agent::terminal::agent_write_to_terminal,
             modes::agent::terminal::agent_resize_terminal,
             modes::agent::terminal::agent_kill_terminal,
+            modes::agent::terminal::agent_open_native_terminal,
             modes::agent::worktree::agent_is_git_repo,
             modes::agent::worktree::agent_create_worktree,
             modes::agent::worktree::agent_remove_worktree,
@@ -546,6 +570,11 @@ pub fn run() {
             modes::workspace::commands::workspace_mcp_new_token,
             modes::workspace::commands::workspace_scan_project_issues,
             modes::workspace::commands::workspace_scan_project_issues_by_url,
+            // Editor (VS Code embedded)
+            modes::editor::editor_get_port,
+            modes::editor::editor_open_project,
+            modes::editor::editor_set_binary_path,
+            modes::editor::editor_sync_theme,
         ])
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {

@@ -9,6 +9,7 @@ const VALID_MODES: AppMode[] = ['agent', 'rest', 'sql', 'nosql', 'ssh', 'explore
 function loadInitialMode(): AppMode {
   try {
     const saved = localStorage.getItem(STORAGE_KEYS.LAST_MODE);
+    // Never restore 'editor' — was removed.
     if (saved && (VALID_MODES as string[]).includes(saved)) return saved as AppMode;
   } catch { /* ignore */ }
   return 'agent';

@@ -38,7 +38,7 @@
   // Collapsed project groups — persisted across app reloads so the user's
   // organisation choices survive a restart. localStorage (sync, instant)
   // is fine here since this is purely device-local UI state.
-  const COLLAPSED_KEY = 'clauge.agent.collapsedProjects';
+  const COLLAPSED_KEY = 'Synape.agent.collapsedProjects';
   function loadCollapsed(): Set<string> {
     try {
       const raw = localStorage.getItem(COLLAPSED_KEY);
@@ -248,7 +248,9 @@
             oncontextmenu={(e) => showSessionMenu(e, session)}
           >
             <span class="session-icon">
-              {#if session.provider === 'codex'}
+              {#if session.provider === 'antigravity'}
+                <img src="/antigravity.png" alt="Antigravity" width="22" height="22" class="session-icon-img antigravity" />
+              {:else if session.provider === 'codex'}
                 <img src="/codex.svg" alt="Codex" width="22" height="22" class="session-icon-img codex" />
               {:else if session.provider === 'gemini'}
                 <img src="/gemini.svg" alt="Gemini" width="22" height="22" class="session-icon-img gemini" />

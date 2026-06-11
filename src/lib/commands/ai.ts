@@ -35,7 +35,7 @@ export async function aiChat(
   systemPrompt: string,
   tools: any[],
   provider: string = 'claude',
-  // Extra HTTP headers to attach upstream. Used by the `clauge` provider
+  // Extra HTTP headers to attach upstream. Used by the `Synape` provider
   // to send `X-Provider: github|google` so the worker can pick the right
   // JWKS to validate the bearer.
   extraHeaders?: Record<string, string>,
@@ -53,7 +53,7 @@ export async function aiChat(
 }
 
 /// Returns [token, providerSlug] for the currently signed-in cloud user,
-/// or null if not signed in. The token is the Bearer used with the Clauge
+/// or null if not signed in. The token is the Bearer used with the Synape
 /// worker; providerSlug ("github" | "google") tells the worker which JWKS
 /// to validate against.
 export async function cloudGetActiveToken(): Promise<[string, string] | null> {

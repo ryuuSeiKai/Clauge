@@ -19,9 +19,9 @@
   async function handleWhatsNew() {
     try {
       const { openUrl } = await import('@tauri-apps/plugin-opener');
-      await openUrl('https://clauge.in/changelog.html');
+      await openUrl('https://Synape.in/changelog.html');
     } catch {
-      window.open('https://clauge.in/changelog.html', '_blank');
+      window.open('https://Synape.in/changelog.html', '_blank');
     }
   }
 

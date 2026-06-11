@@ -1,6 +1,6 @@
 //! Bootstrap `_sqlx_migrations` for databases that pre-date this migrator.
 //!
-//! Older Clauge alpha builds applied migrations via tauri-plugin-sql's
+//! Older Synape alpha builds applied migrations via tauri-plugin-sql's
 //! `add_migrations` plus a manual sqlx loop in `lib.rs` that re-ran every
 //! boot. Neither tracked applied versions in `_sqlx_migrations`. Switching
 //! to `sqlx::migrate!` without a bootstrap would cause it to attempt to

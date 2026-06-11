@@ -1,9 +1,9 @@
-/* Milkdown / Crepe theme — Clauge skin.
+/* Milkdown / Crepe theme — Synape skin.
  *
  * Crepe's frame-dark theme is driven by a small set of CSS custom
  * properties scoped to `.milkdown` (see
  * @milkdown/crepe/lib/theme/frame-dark/style.css). Overriding those
- * vars here with Clauge tokens propagates to every Crepe surface in
+ * vars here with Synape tokens propagates to every Crepe surface in
  * one shot — slash menu, block-edit handle, link tooltip, toolbar,
  * placeholder, table, code blocks. No selector-by-selector chase.
  *
@@ -35,7 +35,7 @@
   --crepe-color-inverse: var(--t1) !important;
   --crepe-color-on-inverse: var(--n) !important;
 
-  /* Inline code + error — Clauge accent + standard error token. */
+  /* Inline code + error — Synape accent + standard error token. */
   --crepe-color-inline-code: var(--acc) !important;
   --crepe-color-error: var(--err, #f85149) !important;
 
@@ -46,7 +46,7 @@
   /* Inline-edit area background (e.g. when editing a link inline). */
   --crepe-color-inline-area: var(--surface-hover) !important;
 
-  /* Fonts — pull Clauge's own faces in so the editor reads as part of
+  /* Fonts — pull Synape's own faces in so the editor reads as part of
      the same app, not a third-party widget. */
   --crepe-font-title: var(--ui) !important;
   --crepe-font-default: var(--ui) !important;
@@ -58,7 +58,7 @@
   --crepe-shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
 }
 
-/* Slash menu rounded corners + tighter padding to match Clauge's other
+/* Slash menu rounded corners + tighter padding to match Synape's other
    popovers / context menus. Pure visual polish, doesn't fight Crepe's
    layout. */
 .milkdown .milkdown-slash-menu,
@@ -115,7 +115,7 @@
 
 /* Caret / cursors — Crepe wires every cursor (typing caret, gap
    cursor, drop indicator) to `--crepe-color-outline`, which we
-   re-map to Clauge's border token above so dividers stay subtle.
+   re-map to Synape's border token above so dividers stay subtle.
    That same token leaves the typing caret near-invisible. Override
    the cursor-specific variables to use the accent so the user can
    always see where they're typing, regardless of theme. */
@@ -140,7 +140,7 @@
   opacity: 0.85 !important;
 }
 
-/* Inline code chip — keep readable on Clauge's surfaces. */
+/* Inline code chip — keep readable on Synape's surfaces. */
 .milkdown code {
   background: var(--surface-hover) !important;
   padding: 1px 6px !important;

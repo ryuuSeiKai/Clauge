@@ -1,11 +1,11 @@
-// Typed HTTP client for the Clauge Worker API. Uses the shared proxy-aware
+// Typed HTTP client for the Synape Worker API. Uses the shared proxy-aware
 // reqwest client built by `shared::http`.
 
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 
 use crate::cloud::auth::AuthState;
-use crate::cloud::config::API_BASE_URL;
+use crate::cloud::config::api_base_url;
 use crate::cloud::models::{
     AuthResponse, MeResponse, SyncPullResponse, SyncPushResponse, SyncStateRow,
 };
@@ -26,7 +26,7 @@ pub enum CloudError {
 impl std::fmt::Display for CloudError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CloudError::NotAuthenticated => write!(f, "Not signed in to Clauge cloud"),
+            CloudError::NotAuthenticated => write!(f, "Not signed in to Synape cloud"),
             CloudError::Network(e) => write!(f, "Network error: {}", e),
             CloudError::Server { status, body } => write!(f, "Cloud API {}: {}", status, body),
             CloudError::Conflict { .. } => write!(f, "Remote has changed since this device last synced."),
@@ -156,7 +156,7 @@ pub async fn update_profile(
             .active_token_and_provider()
             .ok_or(CloudError::NotAuthenticated)?;
         let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
-        let url = format!("{}{}", API_BASE_URL, "/api/auth/me");
+        let url = format!("{}{}", api_base_url(), "/api/auth/me");
         // Only include fields the caller passed — `null` clears, missing = leave alone.
         let mut body = serde_json::Map::new();
         if let Some(ref v) = display_name { body.insert("displayName".into(), serde_json::Value::String(v.clone())); }
@@ -186,7 +186,7 @@ pub async fn delete_account(
             .active_token_and_provider()
             .ok_or(CloudError::NotAuthenticated)?;
         let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
-        let url = format!("{}{}", API_BASE_URL, "/api/auth/me");
+        let url = format!("{}{}", api_base_url(), "/api/auth/me");
         let resp = client
             .delete(url)
             .header("Authorization", format!("Bearer {}", token))
@@ -214,7 +214,7 @@ pub async fn link(
         let body = serde_json::json!({
             "provider": provider,
             "code": code,
-            "redirectUri": redirect_uri.unwrap_or("https://clauge.in/auth/google-callback.html"),
+            "redirectUri": redirect_uri.unwrap_or(&format!("{}/auth/google-callback.html", api_base_url())),
         });
         post_json_auth(pool, "/api/auth/link", body, &token, &active_provider).await
     })
@@ -295,7 +295,7 @@ pub async fn sync_push(
             .active_token_and_provider()
             .ok_or(CloudError::NotAuthenticated)?;
         let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
-        let url = format!("{}{}/{}", API_BASE_URL, "/api/sync/push", kind);
+        let url = format!("{}{}/{}", api_base_url(), "/api/sync/push", kind);
 
         let mut body = serde_json::Map::new();
         body.insert("contentHash".into(), serde_json::Value::String(content_hash.into()));
@@ -344,7 +344,7 @@ pub async fn sync_wipe(pool: &SqlitePool, state: &AuthState) -> Result<(), Cloud
             .active_token_and_provider()
             .ok_or(CloudError::NotAuthenticated)?;
         let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
-        let url = format!("{}{}", API_BASE_URL, "/api/sync/wipe");
+        let url = format!("{}{}", api_base_url(), "/api/sync/wipe");
         let resp = client
             .delete(url)
             .header("Authorization", format!("Bearer {}", token))
@@ -366,7 +366,7 @@ pub(crate) async fn get_json_no_auth<T: DeserializeOwned>(
 ) -> Result<T, CloudError> {
     let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
     let resp = client
-        .get(format!("{}{}", API_BASE_URL, path))
+        .get(format!("{}{}", api_base_url(), path))
         .send()
         .await
         .map_err(|e| CloudError::Network(e.to_string()))?;
@@ -380,7 +380,7 @@ pub(crate) async fn post_json_no_auth<T: DeserializeOwned>(
 ) -> Result<T, CloudError> {
     let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
     let resp = client
-        .post(format!("{}{}", API_BASE_URL, path))
+        .post(format!("{}{}", api_base_url(), path))
         .header("Content-Type", "application/json")
         .json(&body)
         .send()
@@ -398,7 +398,7 @@ pub(crate) async fn post_json_auth<T: DeserializeOwned>(
 ) -> Result<T, CloudError> {
     let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
     let resp = client
-        .post(format!("{}{}", API_BASE_URL, path))
+        .post(format!("{}{}", api_base_url(), path))
         .header("Authorization", format!("Bearer {}", token))
         .header("X-Provider", provider)
         .header("Content-Type", "application/json")
@@ -417,7 +417,7 @@ pub(crate) async fn get_json_auth<T: DeserializeOwned>(
 ) -> Result<T, CloudError> {
     let client = build_app_http_client(pool).await.map_err(CloudError::Network)?;
     let resp = client
-        .get(format!("{}{}", API_BASE_URL, path))
+        .get(format!("{}{}", api_base_url(), path))
         .header("Authorization", format!("Bearer {}", token))
         .header("X-Provider", provider)
         .send()

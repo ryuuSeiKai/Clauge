@@ -26,22 +26,22 @@ pub async fn stream_openai(
     config: &ProviderConfig,
     sql_manager: &Arc<SqlConnectionManager>,
     nosql_conns: &NoSqlConnections,
-    // Extra headers to attach to every request. Used by the Clauge AI
+    // Extra headers to attach to every request. Used by the Synape AI
     // provider to send `X-Provider: github|google` so our worker can
     // validate the bearer against the right JWKS.
     extra_headers: &std::collections::HashMap<String, String>,
-    // Auth state — only meaningful for the Clauge AI provider, where it
+    // Auth state — only meaningful for the Synape AI provider, where it
     // enables auto-refresh of the Google id_token on 401 so a stale
     // session doesn't surface as a user-facing "sign in again" error.
     // `None` for BYOK providers (no refresh path).
     auth_state: Option<&AuthState>,
 ) -> Result<(), String> {
     let mut api_key = api_key.to_string();
-    // We only attempt the Clauge AI refresh+retry dance once per chat to
+    // We only attempt the Synape AI refresh+retry dance once per chat to
     // avoid loops: if refresh succeeds but the new token also 401s,
     // something is genuinely wrong (provider revoked, JWKS mismatch, etc.)
     // and the user has to re-sign-in.
-    let mut clauge_refresh_attempted = false;
+    let mut Synape_refresh_attempted = false;
     let mut total_input_tokens: u64 = 0;
     let mut total_output_tokens: u64 = 0;
 
@@ -141,7 +141,7 @@ pub async fn stream_openai(
             }
         }
 
-        // Clauge AI worker requires a fresh UUID v4 per call for replay
+        // Synape AI worker requires a fresh UUID v4 per call for replay
         // defense (prevents re-streaming a paid-for response). Generate a
         // new one on every loop iteration — each tool round-trip is a
         // distinct billable request from the worker's perspective.
@@ -149,7 +149,7 @@ pub async fn stream_openai(
         // deduction to the right mode in its usage log.
         if matches!(
             config.provider_id,
-            crate::shared::ai::providers::ProviderId::Clauge
+            crate::shared::ai::providers::ProviderId::Synape
         ) {
             body["request_id"] = serde_json::json!(uuid::Uuid::new_v4().to_string());
             if !context.mode.is_empty() {
@@ -168,7 +168,7 @@ pub async fn stream_openai(
             HeaderValue::from_str(&format!("Bearer {}", api_key)).map_err(|e| e.to_string())?,
         );
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        // Insert any caller-supplied extra headers (e.g. X-Provider for Clauge AI).
+        // Insert any caller-supplied extra headers (e.g. X-Provider for Synape AI).
         for (k, v) in extra_headers.iter() {
             if let (Ok(name), Ok(value)) = (
                 reqwest::header::HeaderName::from_bytes(k.as_bytes()),
@@ -181,7 +181,7 @@ pub async fn stream_openai(
         log::info!("[AI OpenAI] POST {} model={}", config.api_url, config.model_id);
 
         let response = client
-            .post(config.api_url)
+            .post(config.api_url.as_ref())
             .headers(headers)
             .json(&body)
             .send()
@@ -198,25 +198,25 @@ pub async fn stream_openai(
         if !response.status().is_success() {
             let status = response.status().as_u16();
 
-            // Clauge AI auto-refresh on 401: the user's cloud bearer is a
+            // Synape AI auto-refresh on 401: the user's cloud bearer is a
             // Google id_token (or GitHub token) and Google id_tokens rotate
             // every ~1 hour. Catch the first 401 of a chat, refresh the
             // token via `/api/auth/google/refresh`, swap in the new bearer,
             // and retry the same request. Mirrors `with_google_refresh_retry`
             // in cloud/client.rs but at the streaming-request level here.
-            // For GitHub or non-Clauge providers there's no refresh path,
+            // For GitHub or non-Synape providers there's no refresh path,
             // so we fall through to the normal error mapping.
             if status == 401
                 && matches!(
                     config.provider_id,
-                    crate::shared::ai::providers::ProviderId::Clauge
+                    crate::shared::ai::providers::ProviderId::Synape
                 )
-                && !clauge_refresh_attempted
+                && !Synape_refresh_attempted
                 && auth_state.is_some()
             {
-                clauge_refresh_attempted = true;
+                Synape_refresh_attempted = true;
                 let state = auth_state.unwrap();
-                log::info!("[AI Clauge] 401 received — attempting Google token refresh");
+                log::info!("[AI Synape] 401 received — attempting Google token refresh");
                 // Try the refresh BEFORE we consume the response body. If the
                 // refresh succeeds we drain + drop the response and continue
                 // the outer loop with the new bearer; if it fails we leave
@@ -230,11 +230,11 @@ pub async fn stream_openai(
                         api_key = new_tok;
                         // Drain the response so the connection can be reused.
                         let _ = response.bytes().await;
-                        log::info!("[AI Clauge] refresh succeeded — retrying the request");
+                        log::info!("[AI Synape] refresh succeeded — retrying the request");
                         continue;
                     }
                 }
-                log::warn!("[AI Clauge] token refresh failed — surfacing 401 to caller");
+                log::warn!("[AI Synape] token refresh failed — surfacing 401 to caller");
             }
 
             let retry_after = response.headers()
@@ -250,8 +250,8 @@ pub async fn stream_openai(
             let msg = match status {
                 401 => "Invalid API key".to_string(),
                 402 => {
-                    // Clauge AI returns:
-                    //   {"error":"INSUFFICIENT_CREDITS","message":"out of Clauge AI credits this cycle","retryable":false}
+                    // Synape AI returns:
+                    //   {"error":"INSUFFICIENT_CREDITS","message":"out of Synape AI credits this cycle","retryable":false}
                     // Other providers may return a generic OpenAI-shape body. Always
                     // produce a message that contains the word "credits" so the
                     // frontend error mapper can classify it without parsing JSON.
@@ -345,7 +345,7 @@ pub async fn stream_openai(
 
         // Track the most recent `event:` line so the data: that follows can
         // be routed to the right handler. Default upstream chat SSE has no
-        // event: line at all (everything is `data: {...}`); our Clauge AI
+        // event: line at all (everything is `data: {...}`); our Synape AI
         // worker prefixes credit notifications with `event: balance`.
         let mut current_event: Option<String> = None;
 
@@ -367,10 +367,10 @@ pub async fn stream_openai(
                 break;
             }
 
-            // Clauge-AI-worker-specific: live credit balance after each chat.
+            // Synape-AI-worker-specific: live credit balance after each chat.
             // Patch ProStateManager directly — it persists the snapshot and
             // emits cloud:pro-state, which the frontend's proState
-            // subscription consumes. Replaces the legacy clauge_ai:balance
+            // subscription consumes. Replaces the legacy Synape_ai:balance
             // event so there's exactly one event surface for credit updates.
             if current_event.as_deref() == Some("balance") {
                 if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(data) {

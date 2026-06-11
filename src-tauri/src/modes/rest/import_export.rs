@@ -16,22 +16,22 @@ pub struct ImportResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ClaugeExport {
+struct SynapeExport {
     format: String,
     exported_at: String,
-    collection: Option<ClaugeCollection>,
-    collections: Option<Vec<ClaugeCollection>>,
+    collection: Option<SynapeCollection>,
+    collections: Option<Vec<SynapeCollection>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct ClaugeCollection {
+struct SynapeCollection {
     name: String,
     description: String,
-    requests: Vec<ClaugeRequest>,
+    requests: Vec<SynapeRequest>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct ClaugeRequest {
+struct SynapeRequest {
     name: String,
     method: String,
     url: String,
@@ -41,12 +41,12 @@ struct ClaugeRequest {
     auth_data: String,
     #[serde(default)]
     pre_script: String,
-    headers: Vec<ClaugeKV>,
-    params: Vec<ClaugeKV>,
+    headers: Vec<SynapeKV>,
+    params: Vec<SynapeKV>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-struct ClaugeKV {
+struct SynapeKV {
     key: String,
     value: String,
     enabled: i32,
@@ -171,7 +171,7 @@ struct PostmanAuthKV {
 
 async fn insert_collection(
     pool: &SqlitePool,
-    coll: &ClaugeCollection,
+    coll: &SynapeCollection,
 ) -> Result<(String, usize), String> {
     let coll_id = Uuid::new_v4().to_string();
     let max_order: (i32,) =
@@ -203,7 +203,7 @@ async fn insert_collection(
 async fn insert_request(
     pool: &SqlitePool,
     collection_id: &str,
-    req: &ClaugeRequest,
+    req: &SynapeRequest,
     sort_order: i32,
 ) -> Result<String, String> {
     let req_id = Uuid::new_v4().to_string();
@@ -268,7 +268,7 @@ async fn insert_request(
 async fn load_collection_export(
     pool: &SqlitePool,
     coll: &Collection,
-) -> Result<ClaugeCollection, String> {
+) -> Result<SynapeCollection, String> {
     let requests = sqlx::query_as::<_, Request>(
         "SELECT * FROM requests WHERE collection_id = ? ORDER BY sort_order ASC",
     )
@@ -277,7 +277,7 @@ async fn load_collection_export(
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut clauge_requests = Vec::new();
+    let mut Synape_requests = Vec::new();
     for req in &requests {
         let headers = sqlx::query_as::<_, RequestHeader>(
             "SELECT * FROM request_headers WHERE request_id = ? ORDER BY sort_order ASC",
@@ -295,7 +295,7 @@ async fn load_collection_export(
         .await
         .map_err(|e| e.to_string())?;
 
-        clauge_requests.push(ClaugeRequest {
+        Synape_requests.push(SynapeRequest {
             name: req.name.clone(),
             method: req.method.clone(),
             url: req.url.clone(),
@@ -306,7 +306,7 @@ async fn load_collection_export(
             pre_script: req.pre_script.clone(),
             headers: headers
                 .iter()
-                .map(|h| ClaugeKV {
+                .map(|h| SynapeKV {
                     key: h.key.clone(),
                     value: h.value.clone(),
                     enabled: h.enabled,
@@ -314,7 +314,7 @@ async fn load_collection_export(
                 .collect(),
             params: params
                 .iter()
-                .map(|p| ClaugeKV {
+                .map(|p| SynapeKV {
                     key: p.key.clone(),
                     value: p.value.clone(),
                     enabled: p.enabled,
@@ -323,10 +323,10 @@ async fn load_collection_export(
         });
     }
 
-    Ok(ClaugeCollection {
+    Ok(SynapeCollection {
         name: coll.name.clone(),
         description: coll.description.clone(),
-        requests: clauge_requests,
+        requests: Synape_requests,
     })
 }
 
@@ -343,12 +343,12 @@ pub async fn export_collection(
         .await
         .map_err(|e| format!("Collection not found: {}", e))?;
 
-    let clauge_coll = load_collection_export(pool.inner(), &coll).await?;
+    let Synape_coll = load_collection_export(pool.inner(), &coll).await?;
 
-    let export = ClaugeExport {
-        format: "clauge/collection/v1".to_string(),
+    let export = SynapeExport {
+        format: "Synape/collection/v1".to_string(),
         exported_at: chrono::Utc::now().to_rfc3339(),
-        collection: Some(clauge_coll),
+        collection: Some(Synape_coll),
         collections: None,
     };
 
@@ -368,33 +368,33 @@ pub async fn export_all_collections(
     .await
     .map_err(|e| e.to_string())?;
 
-    let mut clauge_colls = Vec::new();
+    let mut Synape_colls = Vec::new();
     for coll in &colls {
-        clauge_colls.push(load_collection_export(pool.inner(), coll).await?);
+        Synape_colls.push(load_collection_export(pool.inner(), coll).await?);
     }
 
-    let export = ClaugeExport {
-        format: "clauge/collections/v1".to_string(),
+    let export = SynapeExport {
+        format: "Synape/collections/v1".to_string(),
         exported_at: chrono::Utc::now().to_rfc3339(),
         collection: None,
-        collections: Some(clauge_colls),
+        collections: Some(Synape_colls),
     };
 
     serde_json::to_string_pretty(&export).map_err(|e| e.to_string())
 }
 
-// ── Import Clauge JSON ──────────────────────────────────────────────
+// ── Import Synape JSON ──────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn import_clauge(
+pub async fn import_Synape(
     pool: State<'_, SqlitePool>,
     json: String,
 ) -> Result<ImportResult, String> {
-    let export: ClaugeExport =
-        serde_json::from_str(&json).map_err(|e| format!("Invalid Clauge JSON: {}", e))?;
+    let export: SynapeExport =
+        serde_json::from_str(&json).map_err(|e| format!("Invalid Synape JSON: {}", e))?;
 
-    if !export.format.starts_with("clauge/") {
-        return Err("Not a valid Clauge export format".to_string());
+    if !export.format.starts_with("Synape/") {
+        return Err("Not a valid Synape export format".to_string());
     }
 
     let mut total_collections = 0usize;
@@ -456,14 +456,14 @@ fn extract_postman_url(url: &Option<PostmanUrl>) -> String {
     }
 }
 
-fn extract_postman_params(url: &Option<PostmanUrl>) -> Vec<ClaugeKV> {
+fn extract_postman_params(url: &Option<PostmanUrl>) -> Vec<SynapeKV> {
     match url {
         Some(PostmanUrl::Structured(s)) => s
             .query
             .as_ref()
             .map(|qs| {
                 qs.iter()
-                    .map(|q| ClaugeKV {
+                    .map(|q| SynapeKV {
                         key: q.key.clone(),
                         value: q.value.clone().unwrap_or_default(),
                         enabled: if q.disabled.unwrap_or(false) { 0 } else { 1 },
@@ -541,10 +541,10 @@ fn extract_postman_auth(auth: &Option<PostmanAuth>) -> (String, String) {
 fn flatten_postman_items(
     items: &[PostmanItem],
     parent_auth: &Option<PostmanAuth>,
-    collections: &mut Vec<(String, Vec<ClaugeRequest>)>,
+    collections: &mut Vec<(String, Vec<SynapeRequest>)>,
     collection_name: &str,
 ) {
-    let mut top_requests: Vec<ClaugeRequest> = Vec::new();
+    let mut top_requests: Vec<SynapeRequest> = Vec::new();
 
     for item in items {
         if let Some(ref request) = item.request {
@@ -557,12 +557,12 @@ fn flatten_postman_items(
             let url = extract_postman_url(&request.url);
             let params = extract_postman_params(&request.url);
 
-            let headers: Vec<ClaugeKV> = request
+            let headers: Vec<SynapeKV> = request
                 .header
                 .as_ref()
                 .map(|hs| {
                     hs.iter()
-                        .map(|h| ClaugeKV {
+                        .map(|h| SynapeKV {
                             key: h.key.clone(),
                             value: h.value.clone(),
                             enabled: if h.disabled.unwrap_or(false) { 0 } else { 1 },
@@ -607,7 +607,7 @@ fn flatten_postman_items(
                 .or(parent_auth.as_ref());
             let (auth_type, auth_data) = extract_postman_auth(&effective_auth.cloned());
 
-            top_requests.push(ClaugeRequest {
+            top_requests.push(SynapeRequest {
                 name: item.name.clone(),
                 method,
                 url,
@@ -649,7 +649,7 @@ pub async fn import_postman(
     let postman: PostmanCollection =
         serde_json::from_str(&json).map_err(|e| format!("Invalid Postman JSON: {}", e))?;
 
-    let mut flat_collections: Vec<(String, Vec<ClaugeRequest>)> = Vec::new();
+    let mut flat_collections: Vec<(String, Vec<SynapeRequest>)> = Vec::new();
     flatten_postman_items(
         &postman.item,
         &postman.auth,
@@ -661,7 +661,7 @@ pub async fn import_postman(
     let mut total_requests = 0usize;
 
     for (name, requests) in &flat_collections {
-        let coll = ClaugeCollection {
+        let coll = SynapeCollection {
             name: name.clone(),
             description: String::new(),
             requests: requests.clone(),
@@ -683,7 +683,7 @@ pub async fn import_postman(
 
 // ── Import cURL ─────────────────────────────────────────────────────
 
-fn parse_curl(curl_command: &str) -> Result<ClaugeRequest, String> {
+fn parse_curl(curl_command: &str) -> Result<SynapeRequest, String> {
     let input = curl_command.trim();
     if !input.starts_with("curl") && !input.starts_with("curl") {
         return Err("Not a valid cURL command".to_string());
@@ -695,7 +695,7 @@ fn parse_curl(curl_command: &str) -> Result<ClaugeRequest, String> {
 
     let mut method = String::new();
     let mut url = String::new();
-    let mut headers: Vec<ClaugeKV> = Vec::new();
+    let mut headers: Vec<SynapeKV> = Vec::new();
     let mut body = String::new();
     let mut auth_type = "none".to_string();
     let mut auth_data = String::new();
@@ -714,7 +714,7 @@ fn parse_curl(curl_command: &str) -> Result<ClaugeRequest, String> {
                 i += 1;
                 if i < tokens.len() {
                     if let Some((k, v)) = tokens[i].split_once(':') {
-                        headers.push(ClaugeKV {
+                        headers.push(SynapeKV {
                             key: k.trim().to_string(),
                             value: v.trim().to_string(),
                             enabled: 1,
@@ -745,7 +745,7 @@ fn parse_curl(curl_command: &str) -> Result<ClaugeRequest, String> {
             "-b" | "--cookie" => {
                 i += 1;
                 if i < tokens.len() {
-                    headers.push(ClaugeKV {
+                    headers.push(SynapeKV {
                         key: "Cookie".to_string(),
                         value: tokens[i].clone(),
                         enabled: 1,
@@ -788,7 +788,7 @@ fn parse_curl(curl_command: &str) -> Result<ClaugeRequest, String> {
         .unwrap_or("Imported Request")
         .to_string();
 
-    Ok(ClaugeRequest {
+    Ok(SynapeRequest {
         name: if name.is_empty() {
             "Imported Request".to_string()
         } else {

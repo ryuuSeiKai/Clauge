@@ -28,6 +28,8 @@
         cloudGetStatus,
         cloudGithubLoginUrl,
         cloudGoogleLoginUrl,
+        cloudCreateTicket,
+        cloudPollTicket,
         cloudExchangeCode,
         cloudLinkProvider,
         cloudCheckRemoteExists,
@@ -38,6 +40,8 @@
         cloudSyncPushNow,
         cloudSyncRestore,
         cloudUpdateProfile,
+        cloudGetApiUrl,
+        cloudSetApiUrl,
     } from "$lib/commands/cloud";
     import { showToast } from "$lib/shared/primitives/toast";
     import { friendlyError } from "$lib/utils/errors";
@@ -51,6 +55,48 @@
     let lastNameInput = $state("");
     let savingProfile = $state(false);
     let refreshing = $state(false);
+
+    // ── API URL override (self-hosted server / zrok tunnel) ────────────
+    let apiUrlInput = $state('');
+    let currentApiUrl = $state('');
+    let savingApiUrl = $state(false);
+    const defaultApiUrl = 'http://67.217.243.181:3000';
+
+    async function loadApiUrl() {
+        try {
+            currentApiUrl = await cloudGetApiUrl();
+            if (currentApiUrl !== defaultApiUrl) apiUrlInput = currentApiUrl;
+        } catch { /* ignore */ }
+    }
+    $effect(() => { loadApiUrl(); });
+
+    async function saveApiUrl() {
+        savingApiUrl = true;
+        try {
+            const url = apiUrlInput.trim() || null;
+            await cloudSetApiUrl(url);
+            currentApiUrl = url ?? defaultApiUrl;
+            showToast('API server updated', 'success');
+        } catch (e) {
+            showToast(friendlyError(e), 'error');
+        } finally {
+            savingApiUrl = false;
+        }
+    }
+
+    async function clearApiUrl() {
+        apiUrlInput = '';
+        savingApiUrl = true;
+        try {
+            await cloudSetApiUrl(null);
+            currentApiUrl = defaultApiUrl;
+            showToast('API server updated', 'info');
+        } catch (e) {
+            showToast(friendlyError(e), 'error');
+        } finally {
+            savingApiUrl = false;
+        }
+    }
     let linking = $state<Provider | null>(null);
     let signingIn = $state<Provider | null>(null);
 
@@ -120,6 +166,12 @@
         const detail = (e as CustomEvent<{ provider: Provider; code: string }>)
             .detail;
         if (!detail?.code || !detail?.provider) return;
+
+        // Server-side exchange already handled it — just refresh status.
+        if (detail.code === '__done__') {
+            await refreshStatus();
+            return;
+        }
 
         if (get(cloudConnected) && linking === detail.provider) {
             try {
@@ -254,12 +306,34 @@
 
     async function openOAuth(provider: Provider) {
         try {
+            // Create ticket for polling-based OAuth (no deep-link needed).
+            const ticket = await cloudCreateTicket();
             const url =
                 provider === "github"
-                    ? await cloudGithubLoginUrl()
-                    : await cloudGoogleLoginUrl();
+                    ? await cloudGithubLoginUrl(ticket)
+                    : await cloudGoogleLoginUrl(ticket);
             const { openUrl } = await import("@tauri-apps/plugin-opener");
             await openUrl(url);
+
+            // Poll for the ticket result every 2 seconds (max 60s).
+            const poll = async (): Promise<void> => {
+                for (let i = 0; i < 30; i++) {
+                    await new Promise((r) => setTimeout(r, 2000));
+                    const result = await cloudPollTicket(ticket).catch(() => ({ status: "pending", token: undefined }));
+                    if (result.status === "ready") {
+                        // Exchange the token to store it and get user info.
+                        const status = await cloudExchangeCode(provider, result.token!);
+                        if (status.user) {
+                            setConnected(status.user, status.providers, status.activeProvider, status.plan);
+                            setLastSyncedForKinds(status.lastSynced || {});
+                            showToast(`Connected as ${status.user.displayName || status.user.slug}`, "success");
+                        }
+                        return;
+                    }
+                }
+                showToast("Authentication timed out. Please try again.", "error");
+            };
+            poll(); // fire and forget — runs independently
         } catch (e) {
             showToast(friendlyError(e), "error");
             signingIn = null;
@@ -1101,6 +1175,43 @@
                         </header>
                     {/if}
                 </section>
+            </section>
+
+            <!-- API Server -->
+            <section class="acc-card">
+                <h3 class="acc-card-title acc-card-title-solo">
+                    API Server
+                </h3>
+                <p class="acc-desc" style="margin: 0 0 8px;">
+                    Dùng URL từ zrok / ngrok để tự host server xử lý auth
+                    thay vì domain mặc định.
+                </p>
+                <div class="acc-api-url-row">
+                    <input
+                        class="acc-api-url-input"
+                        type="url"
+                        bind:value={apiUrlInput}
+                        placeholder="https://abc123.zrok.io"
+                    />
+                    <button
+                        class="acc-api-url-btn"
+                        onclick={() => saveApiUrl()}
+                        disabled={savingApiUrl}
+                    >
+                        {savingApiUrl ? "Saving…" : "Save"}
+                    </button>
+                    {#if apiUrlInput !== defaultApiUrl}
+                        <button
+                            class="acc-api-url-btn acc-api-url-btn-ghost"
+                            onclick={() => clearApiUrl()}
+                        >
+                            Reset
+                        </button>
+                    {/if}
+                </div>
+                <p class="acc-desc" style="margin: 4px 0 0; font-size: 11px;">
+                    Current: <code class="acc-mono">{currentApiUrl}</code>
+                </p>
             </section>
 
             <!-- Linked accounts -->
@@ -2314,5 +2425,59 @@
         to {
             transform: rotate(360deg);
         }
+    }
+
+    /* ── API Server ──────────────────────────────────────── */
+    .acc-api-url-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .acc-api-url-input {
+        flex: 1;
+        min-width: 0;
+        padding: 6px 10px;
+        border: 1px solid var(--b2);
+        border-radius: 7px;
+        background: var(--surface);
+        color: var(--t1);
+        font-size: 12px;
+        font-family: var(--mono);
+        outline: none;
+        transition: border-color 0.12s;
+    }
+    .acc-api-url-input:focus {
+        border-color: var(--acc);
+    }
+    .acc-api-url-input::placeholder {
+        color: var(--t4);
+    }
+    .acc-api-url-btn {
+        padding: 6px 12px;
+        border: 1px solid var(--b2);
+        border-radius: 7px;
+        background: var(--surface);
+        color: var(--t1);
+        font-size: 12px;
+        font-family: var(--ui);
+        cursor: default;
+        white-space: nowrap;
+        transition: background 0.12s;
+    }
+    .acc-api-url-btn:hover { background: var(--surface-hover); }
+    .acc-api-url-btn:disabled { opacity: 0.5; }
+    .acc-api-url-btn-ghost {
+        background: transparent;
+        border-color: transparent;
+        color: var(--t3);
+    }
+    .acc-api-url-btn-ghost:hover {
+        color: var(--err);
+    }
+    .acc-mono {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--t3);
+        word-break: break-all;
     }
 </style>

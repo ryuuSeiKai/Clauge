@@ -156,7 +156,7 @@ async fn handle_mcp(
         "initialize" => Ok(json!({
             "protocolVersion": PROTOCOL_VERSION,
             "capabilities": { "tools": {} },
-            "serverInfo": { "name": "clauge-workspace", "version": "1.0.0" }
+            "serverInfo": { "name": "Synape-workspace", "version": "1.0.0" }
         })),
         "tools/list" => Ok(json!({ "tools": tool_descriptors() })),
         "tools/call" => dispatch_tool(&state.pool, state.app.as_ref(), params, &actor).await,

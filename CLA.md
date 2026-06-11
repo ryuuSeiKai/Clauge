@@ -1,12 +1,12 @@
 # Contributor License Agreement
 
-By submitting a contribution (pull request, patch, code, documentation, design asset, or other modification) to the Clauge project, you agree to the following terms.
+By submitting a contribution (pull request, patch, code, documentation, design asset, or other modification) to the Synape project, you agree to the following terms.
 
 ## 1. Definitions
 
 - **"You"** means the individual submitting the contribution. If you are submitting on behalf of an employer, you must have the legal authority to bind the employer to this CLA.
-- **"Maintainer"** means Anshuman (support@clauge.in), who maintains the Clauge project and holds the copyright on the original code. The Maintainer reserves the right to assign these CLA rights to a successor entity (for example, a company incorporated to operate Clauge commercially) at any time.
-- **"Contribution"** means any work of authorship that you intentionally submit to the Clauge project for inclusion.
+- **"Maintainer"** means Anshuman (support@Synape.in), who maintains the Synape project and holds the copyright on the original code. The Maintainer reserves the right to assign these CLA rights to a successor entity (for example, a company incorporated to operate Synape commercially) at any time.
+- **"Contribution"** means any work of authorship that you intentionally submit to the Synape project for inclusion.
 
 ## 2. Grant of rights
 
@@ -19,14 +19,14 @@ You retain all rights to your Contribution, including the right to use, license,
 
 ## 3. Why this CLA exists
 
-Clauge is dual-licensed:
+Synape is dual-licensed:
 
 - **Public version:** PolyForm Noncommercial 1.0.0 — free for personal and other noncommercial use, source-available, no commercial use without a separate license.
-- **Commercial licenses:** offered to any organization or individual wanting to use Clauge in a commercial context.
+- **Commercial licenses:** offered to any organization or individual wanting to use Synape in a commercial context.
 
 Without a CLA from every contributor, the Maintainer would need each contributor's individual approval to grant a commercial license that includes their contribution. That makes dual-licensing impractical at any reasonable scale.
 
-This CLA solves that problem while keeping the public version source-available. Revenue from commercial licenses funds ongoing development of Clauge.
+This CLA solves that problem while keeping the public version source-available. Revenue from commercial licenses funds ongoing development of Synape.
 
 ## 4. Your representations
 
@@ -54,8 +54,8 @@ You provide the Contribution "as is" without warranty of any kind. To the extent
 
 ## 8. Agreement
 
-By opening a pull request, submitting a patch, or otherwise sharing a Contribution with the Clauge project, you indicate your agreement to these terms.
+By opening a pull request, submitting a patch, or otherwise sharing a Contribution with the Synape project, you indicate your agreement to these terms.
 
 **First-time contributors** will be asked to explicitly confirm acceptance via the CLA Assistant bot on their first pull request.
 
-If you have questions about this CLA before contributing, email **support@clauge.in**.
+If you have questions about this CLA before contributing, email **support@Synape.in**.

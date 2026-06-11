@@ -397,7 +397,7 @@ pub fn agent_discover_sessions(
 }
 
 /// Look up the most recently-touched session id for `(provider,
-/// project_path)`. Used by the spawn path to "rehydrate" a Clauge
+/// project_path)`. Used by the spawn path to "rehydrate" a Synape
 /// session row whose stored session id was never captured. Critical
 /// for crash/update recovery: if the app died before the PTY-output
 /// regex matched, the UUID is otherwise unrecoverable and clicking

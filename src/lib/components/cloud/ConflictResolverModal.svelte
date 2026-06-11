@@ -141,7 +141,7 @@
 
         <p class="cr-warn">
           One of these may include deletions on either side. Review your
-          choice carefully — it can’t be undone from inside Clauge.
+          choice carefully — it can’t be undone from inside Synape.
         </p>
       </div>
 

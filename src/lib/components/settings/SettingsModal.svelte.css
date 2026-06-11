@@ -684,7 +684,7 @@
   .ai-subtab.disabled { opacity: 0.35; cursor: not-allowed; }
   .ai-subtab-lock { flex-shrink: 0; margin-left: 2px; }
 
-  /* ── Clauge AI tab cards (Credits / By mode / Activity) ─────────── */
+  /* ── Synape AI tab cards (Credits / By mode / Activity) ─────────── */
   .cai2-card {
     padding: 16px 18px;
     border: 1px solid var(--b1);
@@ -851,7 +851,7 @@
     color: var(--t3);
     padding: 4px 0;
   }
-  /* When the Clauge AI tab is open, kill the outer pane's auto-scroll so
+  /* When the Synape AI tab is open, kill the outer pane's auto-scroll so
      only the activity table scrolls. Mirrors the agent-plugins-pane
      pattern above. */
   .stg-content:has(> .cai2-pane) {
@@ -1088,7 +1088,7 @@
     background: color-mix(in srgb, var(--err, #f04444) 10%, transparent);
   }
 
-  /* -- AI Top tabs (Clauge AI vs BYOK) -- sit above the existing subtabs */
+  /* -- AI Top tabs (Synape AI vs BYOK) -- sit above the existing subtabs */
   .ai-toptabs {
     display: flex;
     gap: 4px;
@@ -1115,7 +1115,7 @@
     border-bottom-color: var(--acc);
   }
 
-  /* -- Clauge AI recent activity list -- */
+  /* -- Synape AI recent activity list -- */
   .cai-history {
     margin-top: 16px;
     padding: 14px 16px;

@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::cloud::auth::{self, AuthState};
 use crate::cloud::client::{self, CloudError};
-use crate::cloud::config::{settings_key_synced_at, SETTINGS_KEY_HAS_SYNCED};
+use crate::cloud::config::{self as cloud_config, api_base_url, settings_key_synced_at, SETTINGS_KEY_HAS_SYNCED};
 use crate::cloud::domains::ALL_KINDS;
 use crate::cloud::models::{CloudAiBalance, CloudAiUsage, CloudPricing, CloudStatus, CloudUser};
 use crate::cloud::pro_state::ProStateManager;
@@ -98,13 +98,92 @@ pub async fn cloud_get_status(
 }
 
 #[tauri::command]
-pub fn cloud_github_login_url() -> String {
-    auth::github_oauth_url()
+pub fn cloud_github_login_url(state: String) -> String {
+    auth::github_oauth_url(&state)
 }
 
 #[tauri::command]
-pub fn cloud_google_login_url() -> String {
-    auth::google_oauth_url()
+pub fn cloud_google_login_url(state: String) -> String {
+    auth::google_oauth_url(&state)
+}
+
+#[tauri::command]
+pub async fn cloud_create_ticket(pool: State<'_, SqlitePool>) -> Result<String, String> {
+    let client = crate::shared::http::build_app_http_client(pool.inner())
+        .await
+        .map_err(|e| format!("http client: {}", e))?;
+    let resp = client
+        .post(format!("{}/api/auth/ticket", api_base_url()))
+        .send()
+        .await
+        .map_err(|e| format!("create ticket: {}", e))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse ticket: {}", e))?;
+    body["ticket"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "missing ticket id".to_string())
+}
+
+/// Response shape from GET /api/auth/ticket/{id}.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct TicketPollResult {
+    pub status: String,
+    pub token: Option<String>,
+    #[serde(rename = "userId")]
+    pub user_id: Option<i64>,
+}
+
+#[tauri::command]
+pub async fn cloud_poll_ticket(
+    pool: State<'_, SqlitePool>,
+    ticket: String,
+) -> Result<TicketPollResult, String> {
+    let client = crate::shared::http::build_app_http_client(pool.inner())
+        .await
+        .map_err(|e| format!("http client: {}", e))?;
+    let resp = client
+        .get(format!("{}/api/auth/ticket/{}", api_base_url(), ticket))
+        .send()
+        .await
+        .map_err(|e| format!("poll ticket: {}", e))?;
+    let body: TicketPollResult = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse ticket response: {}", e))?;
+    Ok(body)
+}
+
+// ─── API URL override (self-hosted server / zrok tunnel) ────────────────────
+
+#[tauri::command]
+pub async fn cloud_set_api_url(
+    pool: State<'_, SqlitePool>,
+    url: Option<String>,
+) -> Result<(), String> {
+    // Persist to settings DB so it survives restart.
+    if let Some(ref u) = url {
+        settings::upsert(pool.inner(), crate::cloud::config::SETTINGS_KEY_API_URL, u)
+            .await
+            .map_err(|e| format!("save api url: {}", e))?;
+    } else {
+        // Clear — delete the setting row.
+        sqlx::query("DELETE FROM settings WHERE key = ?")
+            .bind(crate::cloud::config::SETTINGS_KEY_API_URL)
+            .execute(pool.inner())
+            .await
+            .map_err(|e| format!("clear api url: {}", e))?;
+    }
+    crate::cloud::config::set_api_url_override(url);
+    log::info!("[cloud] API URL override updated");
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cloud_get_api_url() -> String {
+    crate::cloud::config::api_base_url()
 }
 
 // ─── OAuth code exchange (deep-link → here) ─────────────────────────────────
@@ -136,7 +215,7 @@ pub async fn cloud_exchange_code(
             let resp = client::exchange_google(
                 pool.inner(),
                 &code,
-                "https://clauge.in/auth/google-callback.html",
+                &format!("{}/auth/google-callback.html", crate::cloud::config::api_base_url()),
             )
             .await?;
             let id_token = resp.id_token.clone().ok_or_else(|| "missing id_token".to_string())?;
@@ -515,7 +594,7 @@ pub async fn cloud_ai_usage(
 }
 
 /// Returns the active cloud bearer token + provider slug for the JS layer
-/// to use when invoking ai_chat with provider = "clauge". Returns None if
+/// to use when invoking ai_chat with provider = "Synape". Returns None if
 /// the user isn't signed in.
 #[tauri::command]
 pub fn cloud_get_active_token(

@@ -13,6 +13,7 @@
   // session list visually.
   const PROVIDER_ICON: Record<AgentProvider, string> = {
     claude: '/code-no-action.svg',
+    antigravity: '/antigravity.png',
     codex: '/codex.svg',
     gemini: '/gemini.svg',
     opencode: '/opencode-dark.svg',
@@ -21,6 +22,7 @@
   // for visual orientation — not stored, not sent to the backend.
   const PROVIDER_VENDOR: Record<AgentProvider, string> = {
     claude: 'Anthropic',
+    antigravity: 'Google',
     codex: 'OpenAI',
     gemini: 'Google',
     opencode: 'Open source',

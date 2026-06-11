@@ -1,6 +1,6 @@
 <script lang="ts">
     import ConfirmDialog from "$lib/shared/primitives/ConfirmDialog.svelte";
-    import ClaugeAIBalance from "$lib/components/settings/ClaugeAIBalance.svelte";
+    import SynapeAIBalance from "$lib/components/settings/ClaugeAIBalance.svelte";
     import { invoke } from "@tauri-apps/api/core";
     import { cloudPlan, cloudSub, upgradeModalOpen } from "$lib/stores/cloud";
     import AccountTabContent from "$lib/components/settings/AccountTabContent.svelte";
@@ -144,9 +144,9 @@
         else if (key === "ai:byok") {
             activeTab = "ai";
             aiTopTab = "byok";
-        } else if (key === "ai:clauge") {
+        } else if (key === "ai:Synape") {
             activeTab = "ai";
-            aiTopTab = "clauge";
+            aiTopTab = "Synape";
         }
         else if (key === "rest") activeTab = "rest";
         else if (key === "agent") activeTab = "agent";
@@ -444,7 +444,7 @@
     }
 
     // AI Assistance state
-    let aiTopTab = $state<"clauge" | "byok">("clauge");
+    let aiTopTab = $state<"Synape" | "byok">("Synape");
     let aiSubTab = $state<"config" | "usage">("config");
 
     // Synapse AI usage history — fetched from /api/ai/usage via cloud_ai_usage.
@@ -452,7 +452,7 @@
     type CloudAiUsageEntry = {
         occurred_at: string;
         operation: string;
-        clauge_credits: number;
+        Synape_credits: number;
         cost_usd_micros: number;
         request_id: string;
         mode: string | null;
@@ -581,8 +581,8 @@
         let grand = 0;
         for (const e of cloudAiUsage) {
             const m = e.mode ?? "other";
-            totals.set(m, (totals.get(m) ?? 0) + e.clauge_credits);
-            grand += e.clauge_credits;
+            totals.set(m, (totals.get(m) ?? 0) + e.Synape_credits);
+            grand += e.Synape_credits;
         }
         if (grand === 0) return [];
         return Array.from(totals.entries())
@@ -1232,6 +1232,7 @@
     // (no marketplace) — excluded.
     const PLUGIN_PROVIDER_TABS: { id: string; label: string }[] = [
         { id: "claude", label: "Claude" },
+        { id: "antigravity", label: "Antigravity" },
         { id: "codex", label: "Codex" },
     ];
     let pluginProvider = $state<string>("claude");
@@ -1297,7 +1298,7 @@
     }
 
     // Switching tabs reloads the list against the new provider's tooling.
-    // Codex has no marketplace browser in Clauge, so we lock its view
+    // Codex has no marketplace browser in Synape, so we lock its view
     // to 'installed' — flipping to 'marketplace' there would show
     // perpetual-empty state and confuse users.
     function selectPluginProvider(id: string) {
@@ -2162,8 +2163,8 @@
                     <div class="ai-toptabs">
                         <button
                             class="ai-toptab"
-                            class:active={aiTopTab === "clauge"}
-                            onclick={() => (aiTopTab = "clauge")}
+                            class:active={aiTopTab === "Synape"}
+                            onclick={() => (aiTopTab = "Synape")}
                         >
                             Synapse AI
                         </button>
@@ -2176,11 +2177,11 @@
                         </button>
                     </div>
 
-                    {#if aiTopTab === "clauge"}
+                    {#if aiTopTab === "Synape"}
                         {#if $cloudPlan !== "pro"}
                             <!-- Free user: upsell card lives here, full data
                                  panels only appear after upgrade. -->
-                            <ClaugeAIBalance
+                            <SynapeAIBalance
                                 plan={$cloudPlan ?? "free"}
                                 credits={cloudCreditsLocal}
                                 subscription={cloudSubLocal}
@@ -2443,7 +2444,7 @@
                                                             : "—"}
                                                     </span>
                                                     <span class="cai2-td-cost"
-                                                        >−{e.clauge_credits.toLocaleString()}
+                                                        >−{e.Synape_credits.toLocaleString()}
                                                         cr</span
                                                     >
                                                 </div>
@@ -3805,7 +3806,7 @@
                                                     <span
                                                         class="stg-card-row-help"
                                                     >
-                                                        How often Clauge
+                                                        How often Synape
                                                         refreshes live limits
                                                         while Agent mode is
                                                         open.
@@ -3944,7 +3945,7 @@
                                     </div>
 
                                     <!-- Installed / Marketplace toggle. Codex doesn't
-                         have a Clauge-side marketplace browser (installs
+                         have a Synape-side marketplace browser (installs
                          happen inside the codex TUI), so we hide that
                          half of the toggle and show only Installed. -->
                                     {#if pluginProvider !== "codex"}
@@ -5315,7 +5316,7 @@
                                 <div class="about-links">
                                     <a
                                         class="about-link-btn"
-                                        href="https://github.com/ansxuman/Clauge"
+                                        href="https://github.com/ansxuman/Synape"
                                         target="_blank"
                                         rel="noopener"
                                         title="GitHub Repository"
@@ -5329,7 +5330,7 @@
                                     </a>
                                     <a
                                         class="about-link-btn"
-                                        href="https://github.com/ansxuman/Clauge/issues/new/choose"
+                                        href="https://github.com/ansxuman/Synape/issues/new/choose"
                                         target="_blank"
                                         rel="noopener"
                                         title="Report an Issue"
@@ -5365,7 +5366,7 @@
                                     </a>
                                     <a
                                         class="about-link-btn"
-                                        href="https://clauge.in/"
+                                        href="https://Synape.in/"
                                         target="_blank"
                                         rel="noopener"
                                         title="Website"
@@ -5388,7 +5389,7 @@
                                     </a>
                                     <a
                                         class="about-link-btn"
-                                        href="https://x.com/clauge_in"
+                                        href="https://x.com/Synape_in"
                                         target="_blank"
                                         rel="noopener"
                                         title="X / Twitter"
@@ -5402,7 +5403,7 @@
                                     </a>
                                     <a
                                         class="about-link-btn"
-                                        href="mailto:support@clauge.in"
+                                        href="mailto:support@Synape.in"
                                         title="Email Support"
                                     >
                                         <svg viewBox="0 0 24 24"

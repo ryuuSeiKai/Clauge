@@ -1,13 +1,13 @@
-# Contributing to Clauge
+# Contributing to Synape
 
-Thanks for taking the time to contribute. Clauge is a desktop app built with Tauri + SvelteKit, and we welcome patches, bug reports, and feature ideas from the community.
+Thanks for taking the time to contribute. Synape is a desktop app built with Tauri + SvelteKit, and we welcome patches, bug reports, and feature ideas from the community.
 
 Before opening a pull request, please read this document end-to-end — especially the **Branch Naming** and **Commit Authorship** sections.
 
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/your-username/Clauge.git`
+2. Clone your fork: `git clone https://github.com/your-username/Synape.git`
 3. Install dependencies: `bun install`
 4. Run in development: `bun run tauri dev`
 
@@ -75,7 +75,7 @@ If your tooling adds the trailer automatically (Claude Code, Cursor, etc.), stri
 
 ## Reporting Issues
 
-Open issues through the [issue chooser](https://github.com/ansxuman/Clauge/issues/new/choose) — it will route you into the correct template (bug report, feature request, etc.). Blank issues are disabled on purpose: a structured report saves everyone time.
+Open issues through the [issue chooser](https://github.com/ansxuman/Synape/issues/new/choose) — it will route you into the correct template (bug report, feature request, etc.). Blank issues are disabled on purpose: a structured report saves everyone time.
 
 ## License & CLA
 

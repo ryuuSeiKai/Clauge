@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>com.clauge.desktop</id>
-  <name>Clauge</name>
+  <id>com.Synape.desktop</id>
+  <name>Synape</name>
   <summary>An AI-powered cross-platform desktop super-app for developers</summary>
   <description>
     <p>
-      Clauge is an all-in-one developer desktop app. It brings your entire development
+      Synape is an all-in-one developer desktop app. It brings your entire development
       workflow into one place — so you can focus on building instead of switching between tools.
     </p>
     <p>
-      Designed to grow with you, Clauge continuously expands its capabilities to cover
+      Designed to grow with you, Synape continuously expands its capabilities to cover
       more of what developers need, all from a single unified interface.
     </p>
     <p>Features include:</p>
@@ -22,10 +22,10 @@
     </ul>
   </description>
 
-  <launchable type="desktop-id">Clauge.desktop</launchable>
+  <launchable type="desktop-id">Synape.desktop</launchable>
 
-  <url type="homepage">https://clauge.in</url>
-  <url type="bugtracker">https://github.com/ansxuman/Clauge/issues</url>
+  <url type="homepage">https://Synape.in</url>
+  <url type="bugtracker">https://github.com/ansxuman/Synape/issues</url>
 
   <categories>
     <category>Development</category>
@@ -46,8 +46,8 @@
     <keyword>workflow</keyword>
   </keywords>
 
-  <developer id="com.clauge">
-    <name>Clauge</name>
+  <developer id="com.Synape">
+    <name>Synape</name>
   </developer>
 
   <project_license>LicenseRef-proprietary</project_license>

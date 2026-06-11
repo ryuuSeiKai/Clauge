@@ -1048,7 +1048,7 @@
     40% { opacity: 1; transform: scale(1); }
   }
 
-  /* Prompt footer — selector pill + (Clauge AI only) static allowance chip.
+  /* Prompt footer — selector pill + (Synape AI only) static allowance chip.
      Sits just above the input area, sharing its background to read as one
      continuous composer block. Position: relative so the selector's popover
      can anchor upward against this row. */

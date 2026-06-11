@@ -95,6 +95,7 @@
     } from "$lib/stores/cloud";
     import {
         cloudGetStatus,
+        cloudExchangeCode,
         cloudLogout,
         cloudCheckRemoteExists,
         cloudSyncPushNow,
@@ -673,7 +674,7 @@
     onMount(async () => {
         // Fade out splash screen now that the layout is mounted
         requestAnimationFrame(() => {
-            const splash = document.getElementById("clauge-splash");
+            const splash = document.getElementById("Synape-splash");
             if (splash) {
                 splash.classList.add("fade-out");
                 setTimeout(() => splash.remove(), SPLASH_FADE_OUT_MS);
@@ -712,7 +713,7 @@
         // event on every Pro/credit/subscription change (sign-in, refresh,
         // sign-out, post-checkout poll, SSE balance tick, etc.). The
         // back-compat `cloudPlan`/`cloudCredits`/`cloudSub` derived stores
-        // follow automatically. Replaces the old `clauge_ai:balance` listener
+        // follow automatically. Replaces the old `Synape_ai:balance` listener
         // and the inline applyEntitlements logic.
         listen<{ state: import("$lib/stores/cloud").ProState; trigger: string }>(
             "cloud:pro-state",
@@ -834,15 +835,15 @@
         //
         // The installed .desktop Exec line is often missing %u (Tauri's bundler
         // doesn't add it). register() creates a user-local handler at
-        // ~/.local/share/applications/clauge-handler.desktop with the correct
-        // Exec="<binary>" %u, and sets it as the xdg default for clauge://.
+        // ~/.local/share/applications/Synape-handler.desktop with the correct
+        // Exec="<binary>" %u, and sets it as the xdg default for Synape://.
         // This must run on every startup so the path stays current (e.g. after
         // an update). No-op on macOS/Windows per plugin design.
         try {
             const { register, getCurrent, onOpenUrl } =
                 await import("@tauri-apps/plugin-deep-link");
 
-            if (isLinux()) await register("clauge").catch(() => {});
+            if (isLinux()) await register("Synape").catch(() => {});
 
             // Fire cloud_get_status; the Rust ProStateManager applies the
             // entitlements + emits cloud:pro-state which our subscription
@@ -948,7 +949,7 @@
                 for (const url of urls) {
                     try {
                         const u = new URL(url);
-                        if (u.protocol !== "clauge:") continue;
+                        if (u.protocol !== "Synape:") continue;
 
                         if (u.hostname === "oauth-callback") {
                             const params = u.searchParams;
@@ -956,10 +957,25 @@
                                 (params.get("provider") as
                                     | "github"
                                     | "google") || "github";
-                            const code = params.get("code");
+                            let code = params.get("code") || params.get("token");
                             if (!code || code === lastDispatchedToken)
                                 continue;
                             lastDispatchedToken = code;
+                            // Direct token (gho_/ghp_) — server already exchanged it.
+                            // Handle here to bypass component state (signingIn may be null).
+                            if (code.startsWith("gho_") || code.startsWith("ghp_")) {
+                                try {
+                                    const status = await cloudExchangeCode(provider, code);
+                                    if (status?.user) {
+                                        setConnected(status.user, status.providers, status.activeProvider, status.plan);
+                                        setLastSyncedForKinds(status.lastSynced || {});
+                                        showToast(`Connected as ${status.user.displayName || status.user.slug}`, "success");
+                                    }
+                                } catch (e) {
+                                    showToast("Auth failed: " + ((e as any)?.message || String(e)), "error");
+                                }
+                                continue;
+                            }
                             window.dispatchEvent(
                                 new CustomEvent(APP_EVENT.OAUTH_CALLBACK, {
                                     detail: { provider, code },
@@ -1143,7 +1159,7 @@
         }).catch((e) => console.warn("[REST] change listener failed:", e));
 
         // ── Pull-on-focus ────────────────────────────────────────────────
-        // When the user Cmd-Tabs back to Clauge, run a lightweight remote-
+        // When the user Cmd-Tabs back to Synape, run a lightweight remote-
         // state check and silently pull any kinds where the server has
         // moved on AND we don't have unpushed local changes. Debounced to
         // ≥5 minutes so rapid back-and-forth doesn't spam the Worker.
@@ -1198,6 +1214,8 @@
 
         // Load Claude plan from keychain
         loadAgentClaudePlan();
+
+        // Editor tab removed.
 
         // Hydrate Agent footer credentials + provider from settings, then
         // start the usage-limits poll. Either provider being configured is

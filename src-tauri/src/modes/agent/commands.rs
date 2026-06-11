@@ -63,7 +63,7 @@ pub async fn agent_create_session(
     // Lazy MCP registration for non-Claude providers. Boot does NOT
     // auto-register these (would touch ~/.codex/config.toml or
     // ~/.config/opencode/opencode.json for every alpha tester who has
-    // those CLIs but uses Clauge as Claude-only). Triggered here so the
+    // those CLIs but uses Synape as Claude-only). Triggered here so the
     // user has explicitly opted in by creating a session in that
     // provider. Best-effort; silent on failure.
     crate::modes::workspace::commands::ensure_provider_mcp_registered(
@@ -176,13 +176,13 @@ pub async fn agent_detach_context(pool: State<'_, SqlitePool>, session_id: Strin
 // marker block from every known file defensively — handles the case
 // where the user attached the same context to sessions under
 // different providers in the same project.
-const CTX_MARKER_START: &str = "<!-- CLAUGE-CONTEXT-START -->";
-const CTX_MARKER_END: &str = "<!-- CLAUGE-CONTEXT-END -->";
+const CTX_MARKER_START: &str = "<!-- Synape-CONTEXT-START -->";
+const CTX_MARKER_END: &str = "<!-- Synape-CONTEXT-END -->";
 // Purpose prompt is its own separate marker pair so it coexists with
-// user-attached contexts (CLAUGE-CONTEXT-*) without either feature
+// user-attached contexts (Synape-CONTEXT-*) without either feature
 // stomping the other's block when one updates and the other doesn't.
-const PURPOSE_MARKER_START: &str = "<!-- CLAUGE-PURPOSE-START -->";
-const PURPOSE_MARKER_END: &str = "<!-- CLAUGE-PURPOSE-END -->";
+const PURPOSE_MARKER_START: &str = "<!-- Synape-PURPOSE-START -->";
+const PURPOSE_MARKER_END: &str = "<!-- Synape-PURPOSE-END -->";
 const ALL_CONTEXT_FILES: &[&str] = &["CLAUDE.md", "AGENTS.md", "GEMINI.md"];
 
 fn context_file_for(provider: &str) -> &'static str {
@@ -280,7 +280,7 @@ pub fn agent_remove_injected_contexts(project_path: String) -> Result<(), String
 }
 
 /// Write the session's purpose prompt into the provider's project-level
-/// context file inside `<!-- CLAUGE-PURPOSE-START --> … <!-- CLAUGE-PURPOSE-END -->`.
+/// context file inside `<!-- Synape-PURPOSE-START --> … <!-- Synape-PURPOSE-END -->`.
 ///
 /// Background: every other supported CLI exposes a real system-prompt
 /// flag (Claude `--append-system-prompt`, Codex `-c instructions=…`).
@@ -300,7 +300,7 @@ pub fn agent_remove_injected_contexts(project_path: String) -> Result<(), String
 /// use different marker pairs.
 fn write_injected_purpose(path: &PathBuf, purpose_text: &str) -> Result<(), String> {
     let trimmed = purpose_text.trim();
-    // Read existing file, stripping any prior CLAUGE-PURPOSE block.
+    // Read existing file, stripping any prior Synape-PURPOSE block.
     let existing = if path.exists() {
         let raw = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
         if let (Some(start), Some(end)) =

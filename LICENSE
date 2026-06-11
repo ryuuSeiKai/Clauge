@@ -1,22 +1,22 @@
-Clauge — An AI-powered cross-platform desktop super-app for developers
+Synape — An AI-powered cross-platform desktop super-app for developers
 Copyright (C) 2025-2026 Anshuman (and contributors)
 
-Clauge is source-available under the PolyForm Noncommercial License 1.0.0
+Synape is source-available under the PolyForm Noncommercial License 1.0.0
 (the "License"). The full text of the License is reproduced below.
 
 In plain English:
 
-  * Personal, hobby, academic, and other noncommercial use of Clauge is
+  * Personal, hobby, academic, and other noncommercial use of Synape is
     free of charge. See the "Permitted Purposes" sections of the License
     below for the precise definition.
 
   * Any commercial use — by any for-profit entity, including individuals
-    using Clauge in connection with for-profit work, and including all
+    using Synape in connection with for-profit work, and including all
     forms of internal-only commercial use — requires a separate commercial
     license from the copyright holder.
 
-Commercial licensing: contact support@clauge.in or fill out the enterprise
-form at https://clauge.in/enterprise.html to discuss terms. Pricing scales
+Commercial licensing: contact support@Synape.in or fill out the enterprise
+form at https://Synape.in/enterprise.html to discuss terms. Pricing scales
 with the size and nature of the deploying organization.
 
 The copyright holder owns the original code and, via the Contributor
@@ -27,15 +27,15 @@ contributions under either this License or commercial terms.
 
 RESERVED RIGHTS — NOT AVAILABLE UNDER ANY LICENSE
 
-The following two uses of Clauge are reserved by the copyright holder and
+The following two uses of Synape are reserved by the copyright holder and
 are NOT available under any commercial license terms. No commercial
 agreement, present or future, will grant these rights:
 
-  1. Integrating Clauge (or any portion of it) into a closed-source
+  1. Integrating Synape (or any portion of it) into a closed-source
      product that is distributed, sold, licensed, or otherwise made
      available to third parties.
 
-  2. Operating any modified version of Clauge as a hosted, managed, or
+  2. Operating any modified version of Synape as a hosted, managed, or
      other-as-a-service offering provided to third parties (with or
      without modification, with or without payment).
 
@@ -47,16 +47,16 @@ regardless of organization size, payment, or other terms negotiated.
 
 TRADEMARKS
 
-"Clauge", the Clauge name, and the Clauge logo are trademarks of the
+"Synape", the Synape name, and the Synape logo are trademarks of the
 copyright holder. The License below grants copyright permissions only;
 it does NOT grant any trademark permissions.
 
 Forks distributed publicly must use a different name and a different
-logo. You may NOT use the Clauge name or marks to identify or promote
+logo. You may NOT use the Synape name or marks to identify or promote
 your fork, or in any way that suggests your fork is endorsed by or
-affiliated with the official Clauge project.
+affiliated with the official Synape project.
 
-Nominative fair use ("compatible with Clauge", "imported from Clauge")
+Nominative fair use ("compatible with Synape", "imported from Synape")
 is permitted.
 
 ================================================================================
@@ -98,7 +98,7 @@ URL for them above, as well as copies of any plain-text lines
 beginning with `Required Notice:` that the licensor provided
 with the software.  For example:
 
-> Required Notice: Copyright Anshuman (https://clauge.in)
+> Required Notice: Copyright Anshuman (https://Synape.in)
 
 ## Changes and New Works License
 

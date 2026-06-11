@@ -1,6 +1,6 @@
 // REST mode — owns collection / request / environment CRUD against app
 // SQLite, the HTTP executor that runs saved or ad-hoc requests, the
-// request-history aggregate, the Postman / cURL / Clauge-format
+// request-history aggregate, the Postman / cURL / Synape-format
 // importers and exporters, and the AI tool implementations that drive
 // REST flows from the chat surface.
 //

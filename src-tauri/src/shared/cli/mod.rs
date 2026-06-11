@@ -2,6 +2,7 @@
 // wraps a coding-assistant CLI) relies on. See `runner.rs` for the trait,
 // `claude.rs` for the Claude implementation.
 
+pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod gemini;

@@ -76,15 +76,15 @@ export const WORKSPACE_EVENT = {
 } as const;
 
 export const APP_EVENT = {
-  TAB_CLOSE_PROMPT: 'clauge:tab-close-prompt',
-  SQL_SAVE: 'clauge:sql-save',
-  SAVE_NEW_REQUEST: 'clauge:save-new-request',
+  TAB_CLOSE_PROMPT: 'Synape:tab-close-prompt',
+  SQL_SAVE: 'Synape:sql-save',
+  SAVE_NEW_REQUEST: 'Synape:save-new-request',
   /** Detail: `{ provider: 'github' | 'google'; code: string }`.
    *  The receiver calls `cloudExchangeCode(provider, code)`. */
-  OAUTH_CALLBACK: 'clauge:oauth-callback',
+  OAUTH_CALLBACK: 'Synape:oauth-callback',
   /** Fired by Cmd/Ctrl+T (and any other "new tab" shortcut). Topbar
    *  listens and invokes the same handler the "+" button uses, so per-mode
    *  behaviour (SSH/Agent/Workspace pickers, SQL script prompt, blank
    *  REST/NoSQL tab, etc.) stays in one place. */
-  NEW_TAB: 'clauge:new-tab',
+  NEW_TAB: 'Synape:new-tab',
 } as const;

@@ -49,8 +49,8 @@ export async function sendChatMessage(
     // Synapse AI usage is tracked centrally by the worker (visible in the
     // Synapse AI tab via /api/ai/usage), so we skip the local BYOK stats
     // table for those sends — otherwise the BYOK stats would show a
-    // `clauge-managed` row alongside the real BYOK models.
-    if (provider !== 'clauge') {
+    // `Synape-managed` row alongside the real BYOK models.
+    if (provider !== 'Synape') {
       recordAiUsage(chatMode, model, e.payload.inputTokens, e.payload.outputTokens, rounds).catch(() => {});
     }
   }));

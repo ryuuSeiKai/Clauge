@@ -387,7 +387,7 @@
     // --- Find/Replace panel (@codemirror/search) ---
     // The default panel ships with light-mode gray styling that
     // clashes against the dark editor. Theme it with the app's tokens
-    // so it feels like part of Clauge, not a foreign widget.
+    // so it feels like part of Synape, not a foreign widget.
     '.cm-panels': {
       backgroundColor: 'var(--n2)',
       color: 'var(--t1)',

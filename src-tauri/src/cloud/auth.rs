@@ -7,8 +7,8 @@ use sqlx::SqlitePool;
 use std::sync::Arc;
 
 use crate::cloud::config::{
-    KEYRING_SERVICE, KEY_GITHUB_ACCESS, KEY_GOOGLE_ACCESS, KEY_GOOGLE_ID, KEY_GOOGLE_REFRESH,
-    SETTINGS_KEY_ACTIVE_PROVIDER, SETTINGS_KEY_USER_ID,
+    api_base_url, KEYRING_SERVICE, KEY_GITHUB_ACCESS, KEY_GOOGLE_ACCESS, KEY_GOOGLE_ID,
+    KEY_GOOGLE_REFRESH, SETTINGS_KEY_ACTIVE_PROVIDER, SETTINGS_KEY_USER_ID,
 };
 use crate::shared::platform::credential_store::{credential_store, CredentialStore};
 use crate::shared::repos::settings;
@@ -278,11 +278,11 @@ fn keyring_key(suffix: &str) -> String {
 
 // ─── OAuth URL builders ─────────────────────────────────────────────────────
 
-const GITHUB_CLIENT_ID: &str = "Ov23liXcWby6XVM80TfG";
+const GITHUB_CLIENT_ID: &str = "Ov23li3UA9LciMtYCY3Y";
 const GOOGLE_CLIENT_ID: &str =
     "361959797138-ahsfia59q9cf6h6njln6qt26jk763jp7.apps.googleusercontent.com";
 
-pub fn github_oauth_url() -> String {
+pub fn github_oauth_url(state: &str) -> String {
     // `user:email` is the minimum scope that lets the worker call
     // `/user/emails` and resolve the user's primary verified email. Without
     // it, GitHub's `/user` endpoint returns `email: null` whenever a user
@@ -292,25 +292,27 @@ pub fn github_oauth_url() -> String {
     // this is still a privacy win over the prior `scope=gist` we used in
     // earlier versions.
     format!(
-        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope={}",
+        "https://github.com/login/oauth/authorize?client_id={}&redirect_uri={}&scope={}&state={}",
         GITHUB_CLIENT_ID,
-        urlencoding::encode("https://clauge.in/auth/callback"),
+        urlencoding::encode(&format!("{}/auth/callback", api_base_url())),
         urlencoding::encode("user:email"),
+        state,
     )
 }
 
-pub fn google_oauth_url() -> String {
-    let redirect = urlencoding::encode("https://clauge.in/auth/google-callback.html");
+pub fn google_oauth_url(state: &str) -> String {
+    let redirect = urlencoding::encode(&format!("{}/auth/google-callback.html", api_base_url()));
     let scope = urlencoding::encode("openid email profile");
     format!(
         "https://accounts.google.com/o/oauth2/v2/auth?response_type=code\
          &client_id={}\
          &redirect_uri={}\
          &scope={}\
+         &state={}\
          &access_type=offline\
          &prompt=consent\
          &include_granted_scopes=true",
-        GOOGLE_CLIENT_ID, redirect, scope,
+        GOOGLE_CLIENT_ID, redirect, scope, state,
     )
 }
 

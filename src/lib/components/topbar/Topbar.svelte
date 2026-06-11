@@ -536,7 +536,9 @@
         {#if tab.mode === 'agent'}
           {@const _sess = $agentSessions.find((s) => s.id === tab.key)}
           {@const _prov = _sess?.provider ?? 'claude'}
-          {#if _prov === 'codex'}
+          {#if _prov === 'antigravity'}
+            <img src="/antigravity.png" alt="" class="tab-agent-icon" />
+          {:else if _prov === 'codex'}
             <img src="/codex.svg" alt="" class="tab-agent-icon" />
           {:else if _prov === 'gemini'}
             <img src="/gemini.svg" alt="" class="tab-agent-icon" />

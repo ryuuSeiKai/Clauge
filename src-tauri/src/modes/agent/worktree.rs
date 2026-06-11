@@ -6,7 +6,7 @@ fn sanitize_branch_name(name: &str) -> String {
         .collect();
     let sanitized = sanitized.replace("..", ".").replace(".lock", "")
         .trim_matches(|c: char| c == '.' || c == '/' || c == '-').to_string();
-    if sanitized.is_empty() { return "clauge/unnamed".to_string(); }
+    if sanitized.is_empty() { return "Synape/unnamed".to_string(); }
     sanitized.split('/').map(|seg| {
         if seg.starts_with('-') { format!("x{}", seg) } else { seg.to_string() }
     }).collect::<Vec<_>>().join("/")
@@ -21,7 +21,7 @@ pub fn agent_is_git_repo(path: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn agent_create_worktree(project_path: String, branch_name: String) -> Result<String, String> {
     let branch_name = sanitize_branch_name(&branch_name);
-    let worktree_dir = PathBuf::from(&project_path).join(".clauge-worktrees").join(&branch_name);
+    let worktree_dir = PathBuf::from(&project_path).join(".Synape-worktrees").join(&branch_name);
     let worktree_path = worktree_dir.to_string_lossy().to_string();
     if worktree_dir.exists() { return Ok(worktree_path); }
     let _ = std::fs::create_dir_all(worktree_dir.parent().unwrap_or(&worktree_dir));
@@ -49,11 +49,11 @@ pub fn agent_create_worktree(project_path: String, branch_name: String) -> Resul
     }
     let gitignore = PathBuf::from(&project_path).join(".gitignore");
     if let Ok(contents) = std::fs::read_to_string(&gitignore) {
-        if !contents.contains(".clauge-worktrees") {
-            let _ = std::fs::write(&gitignore, format!("{}\n.clauge-worktrees/\n", contents.trim_end()));
+        if !contents.contains(".Synape-worktrees") {
+            let _ = std::fs::write(&gitignore, format!("{}\n.Synape-worktrees/\n", contents.trim_end()));
         }
     } else {
-        let _ = std::fs::write(&gitignore, ".clauge-worktrees/\n");
+        let _ = std::fs::write(&gitignore, ".Synape-worktrees/\n");
     }
     Ok(worktree_path)
 }
@@ -79,7 +79,7 @@ pub fn agent_remove_worktree(project_path: String, worktree_path: String) -> Res
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
         // Treat "not a working tree" / "no such directory" as success — the
-        // worktree is already gone (deleted outside Clauge); prune above
+        // worktree is already gone (deleted outside Synape); prune above
         // cleared the stale git metadata. Caller's intent is satisfied.
         let lower = stderr.to_lowercase();
         if lower.contains("is not a working tree")

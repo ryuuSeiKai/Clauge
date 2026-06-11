@@ -197,7 +197,7 @@ pub struct CloudAiUsage {
 pub struct CloudAiUsageEntry {
     pub occurred_at: String,
     pub operation: String,
-    pub clauge_credits: i64,
+    pub Synape_credits: i64,
     pub cost_usd_micros: i64,
     pub request_id: String,
     /// Originating app mode (rest / sql / nosql / ssh / explorer / agent /

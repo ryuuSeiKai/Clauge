@@ -277,7 +277,7 @@
 
   // Panel is usable when the active provider has its key configured.
   let hasApiKey = $derived(
-    activeProvider === 'clauge'
+    activeProvider === 'Synape'
       ? true
       : !!$settings[`ai_api_key_${activeProvider}`]?.trim()
   );
@@ -506,11 +506,11 @@
     // its "api key" is the user's cloud bearer token (fetched at send time)
     // and it needs an X-Provider header so the worker can pick the right
     // JWKS to validate the token against.
-    // Default matches AIConfigSelector: Pro → 'clauge', Free → 'claude'.
+    // Default matches AIConfigSelector: Pro → 'Synape', Free → 'claude'.
     const provider = $settings['ai_provider'] || 'claude';
     let apiKey = $settings[`ai_api_key_${provider}`] || '';
     let extraHeaders: Record<string, string> | undefined;
-    if (provider === 'clauge') {
+    if (provider === 'Synape') {
       const tok = await cloudGetActiveToken();
       if (!tok) {
         showToast('Sign in to Synapse to use managed AI', 'error');
@@ -597,7 +597,7 @@
       openrouter: 'meta-llama/llama-3.3-70b-instruct:free',
       openai_direct: 'gpt-4.1-mini',
       gemini: 'gemini-3.1-flash-lite',
-      clauge: 'clauge-managed',
+      Synape: 'Synape-managed',
     };
     const modelId = MODEL_MAP[provider] || 'claude-haiku-4-5-20251001';
 
@@ -737,7 +737,7 @@
             // token, which rotates (Google id_tokens expire after ~1h). A
             // 401 here means "session expired, refresh by signing in", not
             // "your stored key is wrong". Different message + action.
-            if (provider === 'clauge') {
+            if (provider === 'Synape') {
               mapped = { type: 'cloud_auth', message: 'Your Synapse session expired. Open Settings → Account and sign in again, then retry.' };
             } else {
               mapped = { type: 'auth', message: 'Invalid API key. Check your key in Settings.' };
@@ -758,7 +758,7 @@
           ) {
             // Synapse AI returns 402 with {"error":"INSUFFICIENT_CREDITS","message":"out of Synapse AI credits this cycle",...}.
             // Other providers use 402 / "insufficient_quota" for billing exhaustion.
-            if (provider === 'clauge') {
+            if (provider === 'Synape') {
               mapped = {
                 type: 'credits',
                 message: "You're out of Synapse AI credits for this cycle. Topup in Settings → Account to continue using Synapse AI, or switch to your own API key.",
@@ -1162,7 +1162,7 @@
 
     <!-- Footer row above the input: provider pill on the left.
          No credits chip — live balance is still wired end-to-end (worker
-         SSE `event: balance` → Rust `clauge_ai:balance` Tauri event →
+         SSE `event: balance` → Rust `Synape_ai:balance` Tauri event →
          `cloudCredits` store) but intentionally not displayed here so
          users don't fixate on the counter ticking down. Settings →
          Account is the canonical place to check usage. -->

@@ -2,12 +2,12 @@
   import { settings, setSetting } from '$lib/stores/settings';
   import { PROVIDERS } from '$lib/shared/ai/providers';
 
-  const CLAUGE = 'clauge';
+  const Synape = 'Synape';
 
   const current = $derived<string>(
     $settings['ai_provider'] || 'claude',
   );
-  const isCurrentClauge = $derived(current === CLAUGE);
+  const isCurrentSynape = $derived(current === Synape);
 
   // Only show BYOK providers the user has actually configured. Keeps the
   // popover tight; unconfigured noise belongs in Settings, not here.
@@ -17,7 +17,7 @@
 
   // Resolve metadata for the currently-selected provider (for the pill label).
   const currentLabel = $derived(
-    current === CLAUGE
+    current === Synape
       ? 'Synapse AI'
       : (PROVIDERS.find((p) => p.providerId === current)?.providerLabel ?? 'Claude'),
   );
@@ -69,7 +69,7 @@
   bind:this={anchorEl}
   type="button"
   class="acs-pill"
-  class:is-clauge={current === CLAUGE}
+  class:is-Synape={current === Synape}
   class:is-open={open}
   onclick={toggle}
   aria-haspopup="listbox"
@@ -106,15 +106,15 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-      class="acs-row is-clauge"
-      class:is-selected={isCurrentClauge}
+      class="acs-row is-Synape"
+      class:is-selected={isCurrentSynape}
       role="option"
       tabindex="0"
-      aria-selected={isCurrentClauge}
-      onclick={() => selectProvider(CLAUGE)}
-      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectProvider(CLAUGE); } }}
+      aria-selected={isCurrentSynape}
+      onclick={() => selectProvider(Synape)}
+      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectProvider(Synape); } }}
     >
-      <span class="acs-row-dot acs-row-dot-clauge" aria-hidden="true">
+      <span class="acs-row-dot acs-row-dot-Synape" aria-hidden="true">
         <svg viewBox="0 0 24 24" width="9" height="9" fill="currentColor">
           <path d="M12 2l2.6 7.4L22 12l-7.4 2.6L12 22l-2.6-7.4L2 12l7.4-2.6L12 2z" />
         </svg>
@@ -123,7 +123,7 @@
         <span class="acs-row-name">Synapse AI</span>
         <span class="acs-row-sub">Managed · no API key needed</span>
       </span>
-      {#if isCurrentClauge}
+      {#if isCurrentSynape}
         <span class="acs-check" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="20 6 9 17 4 12" />
@@ -196,7 +196,7 @@
     border-color: color-mix(in srgb, var(--acc, #c2185b) 50%, var(--b2));
     color: var(--t1, #ddd);
   }
-  .acs-pill.is-clauge {
+  .acs-pill.is-Synape {
     color: var(--t1, #ddd);
   }
   .acs-dot {
@@ -206,7 +206,7 @@
     background: var(--t3, #888);
     flex-shrink: 0;
   }
-  .acs-pill.is-clauge .acs-dot {
+  .acs-pill.is-Synape .acs-dot {
     background: var(--acc, #c2185b);
     box-shadow: 0 0 6px color-mix(in srgb, var(--acc, #c2185b) 60%, transparent);
   }
@@ -261,7 +261,7 @@
   .acs-row.is-selected {
     background: color-mix(in srgb, var(--acc, #c2185b) 12%, transparent);
   }
-  .acs-row.is-clauge.is-selected {
+  .acs-row.is-Synape.is-selected {
     background: color-mix(in srgb, var(--acc, #c2185b) 14%, transparent);
   }
 
@@ -272,7 +272,7 @@
     background: var(--t3, #888);
     flex-shrink: 0;
   }
-  .acs-row-dot-clauge {
+  .acs-row-dot-Synape {
     width: 18px;
     height: 18px;
     border-radius: 6px;

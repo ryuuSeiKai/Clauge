@@ -16,9 +16,9 @@ use std::path::PathBuf;
 /// Resolved location of the JSON file:
 ///   `<app_config_dir>/settings.json`
 /// where `app_config_dir` follows the Tauri convention per OS:
-///   macOS:   `~/Library/Application Support/com.clauge.desktop/`
-///   Linux:   `~/.config/com.clauge.desktop/`
-///   Windows: `%APPDATA%\com.clauge.desktop\`
+///   macOS:   `~/Library/Application Support/com.Synape.desktop/`
+///   Linux:   `~/.config/com.Synape.desktop/`
+///   Windows: `%APPDATA%\com.Synape.desktop\`
 pub fn config_path(app: &tauri::AppHandle) -> Option<PathBuf> {
     use tauri::Manager;
     app.path().app_config_dir().ok().map(|d| d.join("settings.json"))
@@ -52,7 +52,7 @@ pub fn load(app: &tauri::AppHandle) -> AppConfig {
             // Log the parse failure but don't bail. The log might not
             // be initialised yet at the very first call site — eprintln
             // is the only universally-safe sink during boot.
-            eprintln!("[clauge] {} is malformed JSON: {}", path.display(), e);
+            eprintln!("[Synape] {} is malformed JSON: {}", path.display(), e);
             AppConfig::default()
         }
     }

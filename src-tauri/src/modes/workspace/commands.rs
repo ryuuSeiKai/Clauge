@@ -1121,7 +1121,7 @@ const AGENT_OPENCODE: &str = "opencode";
 /// token. Mirrored in `modes/agent/terminal.rs` for `provider=='codex'`
 /// so codex CLI's `--bearer-token-env-var` registration reads the right
 /// variable. Keep this constant in lockstep.
-pub(crate) const CODEX_BEARER_ENV: &str = "CLAUGE_WORKSPACE_TOKEN";
+pub(crate) const CODEX_BEARER_ENV: &str = "Synape_WORKSPACE_TOKEN";
 
 /// Best-effort lazy MCP registration for non-Claude providers.
 /// Called from `agent_create_session` when the user picks Codex or
@@ -1219,7 +1219,7 @@ fn register_claude_code(port: u16, token: &str) -> Result<(), String> {
     }
     let s = servers.as_object_mut().unwrap();
     s.insert(
-        "clauge-workspace".to_string(),
+        "Synape-workspace".to_string(),
         serde_json::json!({
             "type": "http",
             "url": format!("http://localhost:{}/mcp", port),
@@ -1246,7 +1246,7 @@ fn unregister_claude_code() -> Result<(), String> {
     };
     if let Some(map) = root.as_object_mut() {
         if let Some(servers) = map.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-            servers.remove("clauge-workspace");
+            servers.remove("Synape-workspace");
         }
     }
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
@@ -1260,11 +1260,11 @@ fn unregister_claude_code() -> Result<(), String> {
 // records the *env var name* in `~/.codex/config.toml`; the token
 // itself is never written to disk. At runtime, codex reads ENV from
 // its process environment. Our spawn path (terminal.rs, provider=codex)
-// injects `CLAUGE_WORKSPACE_TOKEN=<persisted-token>` into the
+// injects `Synape_WORKSPACE_TOKEN=<persisted-token>` into the
 // CommandBuilder, so codex authenticates to the workspace MCP without
 // the token ever leaving our SQLite. When the user invokes codex
-// outside Clauge the env var isn't set and connection fails — which is
-// correct (Clauge's MCP server isn't running there anyway).
+// outside Synape the env var isn't set and connection fails — which is
+// correct (Synape's MCP server isn't running there anyway).
 
 fn register_codex(port: u16, _token: &str) -> Result<(), String> {
     // We don't pass the token here — codex stores only the env-var
@@ -1275,14 +1275,14 @@ fn register_codex(port: u16, _token: &str) -> Result<(), String> {
     // characters are reachable, so no quoting needed.
     let url = format!("http://localhost:{}/mcp", port);
     let cmd = format!(
-        "codex mcp add clauge-workspace --url {} --bearer-token-env-var {}",
+        "codex mcp add Synape-workspace --url {} --bearer-token-env-var {}",
         url, CODEX_BEARER_ENV
     );
     run_through_user_shell(&cmd, "codex mcp add")
 }
 
 fn unregister_codex() -> Result<(), String> {
-    let cmd = "codex mcp remove clauge-workspace";
+    let cmd = "codex mcp remove Synape-workspace";
     // Best-effort: a missing entry isn't an error from our side.
     let _ = run_through_user_shell(cmd, "codex mcp remove");
     Ok(())
@@ -1325,7 +1325,7 @@ fn register_opencode(port: u16, token: &str) -> Result<(), String> {
     }
     let m = mcp.as_object_mut().unwrap();
     m.insert(
-        "clauge-workspace".to_string(),
+        "Synape-workspace".to_string(),
         serde_json::json!({
             "type": "remote",
             "url": format!("http://localhost:{}/mcp", port),
@@ -1352,7 +1352,7 @@ fn unregister_opencode() -> Result<(), String> {
     };
     if let Some(map) = root.as_object_mut() {
         if let Some(mcp) = map.get_mut("mcp").and_then(|v| v.as_object_mut()) {
-            mcp.remove("clauge-workspace");
+            mcp.remove("Synape-workspace");
         }
     }
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
@@ -1368,7 +1368,7 @@ fn unregister_opencode() -> Result<(), String> {
 // produces for `-t http`:
 //
 //     "mcpServers": {
-//       "clauge-workspace": {
+//       "Synape-workspace": {
 //         "url": "http://localhost:<port>/mcp",
 //         "type": "http",
 //         "headers": { "Authorization": "Bearer <token>" }
@@ -1411,7 +1411,7 @@ fn register_gemini(port: u16, token: &str) -> Result<(), String> {
     }
     let s = servers.as_object_mut().unwrap();
     s.insert(
-        "clauge-workspace".to_string(),
+        "Synape-workspace".to_string(),
         serde_json::json!({
             "url": format!("http://localhost:{}/mcp", port),
             "type": "http",
@@ -1438,7 +1438,7 @@ fn unregister_gemini() -> Result<(), String> {
     };
     if let Some(map) = root.as_object_mut() {
         if let Some(servers) = map.get_mut("mcpServers").and_then(|v| v.as_object_mut()) {
-            servers.remove("clauge-workspace");
+            servers.remove("Synape-workspace");
         }
     }
     let pretty = serde_json::to_string_pretty(&root).map_err(|e| e.to_string())?;
@@ -1497,7 +1497,7 @@ pub async fn workspace_mcp_new_token(
 }
 
 /// Mirror of `sync_claude_code_registration` for Gemini's
-/// `~/.gemini/settings.json`. Only rewrites when `clauge-workspace`
+/// `~/.gemini/settings.json`. Only rewrites when `Synape-workspace`
 /// is already listed; fresh registrations happen at autostart /
 /// enable time.
 fn sync_gemini_registration(port: u16, token: &str) -> Result<(), String> {
@@ -1516,7 +1516,7 @@ fn sync_gemini_registration(port: u16, token: &str) -> Result<(), String> {
     let already_registered = root
         .get("mcpServers")
         .and_then(|v| v.as_object())
-        .map(|m| m.contains_key("clauge-workspace"))
+        .map(|m| m.contains_key("Synape-workspace"))
         .unwrap_or(false);
     if !already_registered {
         return Ok(());
@@ -1525,7 +1525,7 @@ fn sync_gemini_registration(port: u16, token: &str) -> Result<(), String> {
 }
 
 /// Mirror of `sync_claude_code_registration` for OpenCode's JSON
-/// config. Only rewrites when `clauge-workspace` is already listed;
+/// config. Only rewrites when `Synape-workspace` is already listed;
 /// fresh registrations happen at autostart / enable time.
 fn sync_opencode_registration(port: u16, token: &str) -> Result<(), String> {
     let path = match opencode_config_path() {
@@ -1543,7 +1543,7 @@ fn sync_opencode_registration(port: u16, token: &str) -> Result<(), String> {
     let already_registered = root
         .get("mcp")
         .and_then(|v| v.as_object())
-        .map(|m| m.contains_key("clauge-workspace"))
+        .map(|m| m.contains_key("Synape-workspace"))
         .unwrap_or(false);
     if !already_registered {
         return Ok(());
@@ -1551,7 +1551,7 @@ fn sync_opencode_registration(port: u16, token: &str) -> Result<(), String> {
     register_opencode(port, token)
 }
 
-/// If `~/.claude.json` already lists `clauge-workspace`, rewrite the
+/// If `~/.claude.json` already lists `Synape-workspace`, rewrite the
 /// entry with the given port + token. No-op when the file doesn't
 /// exist or has no entry — start/enable is the path that creates the
 /// initial entry, this is only for keeping an existing one in sync.
@@ -1571,7 +1571,7 @@ fn sync_claude_code_registration(port: u16, token: &str) -> Result<(), String> {
     let already_registered = root
         .get("mcpServers")
         .and_then(|v| v.as_object())
-        .map(|m| m.contains_key("clauge-workspace"))
+        .map(|m| m.contains_key("Synape-workspace"))
         .unwrap_or(false);
     if !already_registered {
         return Ok(());
@@ -1628,7 +1628,7 @@ pub async fn maybe_autostart_mcp(app: tauri::AppHandle, pool: SqlitePool) {
             // touch their config files (~/.codex/config.toml,
             // ~/.config/opencode/opencode.json) for every alpha
             // tester who happens to have those CLIs installed for
-            // their own use, even if they only use Clauge as a Claude
+            // their own use, even if they only use Synape as a Claude
             // client. Codex / OpenCode register lazily on first
             // session-create for that provider (see
             // ensure_provider_mcp_registered, called from

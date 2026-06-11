@@ -5,7 +5,7 @@
 {#if $toasts.length > 0}
   <div class="toast-container">
     {#each $toasts as toast (toast.id)}
-      <div class="clauge-toast {toast.type}">
+      <div class="Synape-toast {toast.type}">
         <span class="toast-icon">
           {#if toast.type === 'success'}
             &#10003;
@@ -33,7 +33,7 @@
     pointer-events: none;
   }
 
-  .clauge-toast {
+  .Synape-toast {
     padding: 10px 14px;
     border-radius: var(--radius-lg);
     font-family: var(--mono);
@@ -62,19 +62,19 @@
     }
   }
 
-  .clauge-toast.success {
+  .Synape-toast.success {
     background: rgba(29,200,128,0.9);
     color: #061a10;
     border-color: rgba(29,200,128,0.3);
   }
 
-  .clauge-toast.error {
+  .Synape-toast.error {
     background: rgba(240,68,68,0.9);
     color: #fff;
     border-color: rgba(240,68,68,0.3);
   }
 
-  .clauge-toast.info {
+  .Synape-toast.info {
     background: rgba(79,148,212,0.9);
     color: #fff;
     border-color: rgba(79,148,212,0.3);

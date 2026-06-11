@@ -61,7 +61,7 @@ async fn test_openai_key(
     });
 
     let response = client
-        .post(config.api_url)
+        .post(config.api_url.as_ref())
         .headers(headers)
         .json(&body)
         .send()
@@ -118,7 +118,7 @@ async fn test_anthropic_key(
     });
 
     let response = client
-        .post(config.api_url)
+        .post(config.api_url.as_ref())
         .headers(headers)
         .json(&body)
         .send()
@@ -193,7 +193,7 @@ pub async fn ai_chat(
     tools: Vec<serde_json::Value>,
     provider: String,
     // Optional extra HTTP headers to attach to each upstream request.
-    // Currently used by the `clauge` provider to send `X-Provider:
+    // Currently used by the `Synape` provider to send `X-Provider:
     // github|google` so the worker can validate the cloud bearer token
     // against the correct provider's JWKS.
     extra_headers: Option<std::collections::HashMap<String, String>>,
@@ -203,11 +203,11 @@ pub async fn ai_chat(
     let sql_mgr = sql_manager.inner().clone();
     let nosql_mgr = nosql_connections.inner().clone();
     let extra_headers = extra_headers.unwrap_or_default();
-    // Pass AuthState only for the Clauge provider — that's the only path
+    // Pass AuthState only for the Synape provider — that's the only path
     // where 401 + Google refresh-and-retry is meaningful. BYOK providers
     // get None so the streaming client falls straight through to the
     // normal error mapping.
-    let auth_for_stream = if provider == "clauge" {
+    let auth_for_stream = if provider == "Synape" {
         Some(auth_state.inner())
     } else {
         None

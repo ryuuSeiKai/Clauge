@@ -25,6 +25,7 @@ fn provider_id(p: Option<&str>) -> &str {
 pub fn agent_get_plugins(provider: Option<String>) -> Result<Vec<ClaudePlugin>, String> {
     match provider_id(provider.as_deref()) {
         "codex" => codex::list_installed(),
+        "antigravity" => antigravity_style::list_installed(resolved(provider.as_deref())),
         _ => claude_style::list_installed(resolved(provider.as_deref())),
     }
 }
@@ -37,6 +38,7 @@ pub fn agent_toggle_plugin(
 ) -> Result<(), String> {
     match provider_id(provider.as_deref()) {
         "codex" => codex::set_enabled(&plugin_key, enabled),
+        "antigravity" => antigravity_style::set_enabled(resolved(provider.as_deref()), &plugin_key, enabled),
         _ => claude_style::set_enabled(resolved(provider.as_deref()), &plugin_key, enabled),
     }
 }
@@ -49,6 +51,7 @@ pub fn agent_get_marketplace_plugins(
         // Codex marketplace browsing isn't wired yet — plugins ship as
         // git-repo marketplaces with TOML manifests, deferred.
         "codex" => Ok(Vec::new()),
+        "antigravity" => antigravity_style::list_marketplace(),
         _ => claude_style::list_marketplace(resolved(provider.as_deref())),
     }
 }
@@ -60,6 +63,7 @@ pub fn agent_install_plugin(
     marketplace: String,
 ) -> Result<(), String> {
     match provider_id(provider.as_deref()) {
+        "antigravity" => antigravity_style::install(resolved(provider.as_deref()), &name, &marketplace),
         // Codex doesn't expose plugin install via shell CLI — the
         // `/plugins` slash command inside an interactive codex session
         // is the supported install path. Surface a clean error instead
@@ -79,6 +83,7 @@ pub fn agent_uninstall_plugin(
 ) -> Result<(), String> {
     match provider_id(provider.as_deref()) {
         "codex" => codex::uninstall(&name, &marketplace),
+        "antigravity" => antigravity_style::uninstall(resolved(provider.as_deref()), &name),
         _ => claude_style::uninstall(resolved(provider.as_deref()), &name, &marketplace),
     }
 }
@@ -355,5 +360,74 @@ mod codex {
         let key = format!("{}@{}", name, marketplace);
         plugins_tbl.remove(&key);
         write_doc(&doc)
+    }
+}
+
+// ─── Antigravity (extensions.json + CLI subcommands) ─────────────────────
+//
+// Antigravity stores installed VS Code extensions in
+// ~/.antigravity/extensions/extensions.json (JSON array). CLI operations
+// (install, uninstall, enable/disable) go through `agy plugin <command>`.
+
+mod antigravity_style {
+    use super::*;
+    use std::collections::HashMap;
+
+    pub fn list_installed(cli: &'static dyn CliRunner) -> Result<Vec<ClaudePlugin>, String> {
+        let exts_dir = cli.plugins_dir().ok_or("Cannot determine antigravity plugins dir")?;
+        let exts_json = exts_dir.join("extensions.json");
+        if !exts_json.exists() { return Ok(Vec::new()); }
+        let content = fs::read_to_string(&exts_json).map_err(|e| e.to_string())?;
+        let entries: Vec<serde_json::Value> = serde_json::from_str(&content).map_err(|e| e.to_string())?;
+
+        // Read enabled state from argv.json (optional).
+        let settings_path = cli.settings_file().ok_or("Cannot determine settings file")?;
+        let mut enabled_map: HashMap<String, bool> = HashMap::new();
+        if settings_path.exists() {
+            if let Ok(settings_content) = fs::read_to_string(&settings_path) {
+                if let Ok(settings) = serde_json::from_str::<serde_json::Value>(&settings_content) {
+                    if let Some(plugins) = settings.get("enabledPlugins").and_then(|v| v.as_object()) {
+                        for (k, v) in plugins { enabled_map.insert(k.clone(), v.as_bool().unwrap_or(false)); }
+                    }
+                }
+            }
+        }
+
+        let mut plugins: Vec<ClaudePlugin> = Vec::new();
+        for entry in &entries {
+            let name = entry["identifier"]["id"].as_str().unwrap_or("").to_string();
+            if name.is_empty() { continue; }
+            let version = entry["version"].as_str().map(String::from);
+            let marketplace = entry["metadata"]["source"].as_str().unwrap_or("gallery").to_string();
+            let enabled = enabled_map.get(&name).copied().unwrap_or(true);
+            plugins.push(ClaudePlugin { name, marketplace: marketplace.clone(), enabled, version, install_path: None });
+        }
+        plugins.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(plugins)
+    }
+
+    pub fn set_enabled(cli: &'static dyn CliRunner, plugin_name: &str, enabled: bool) -> Result<(), String> {
+        let subcmd = if enabled { "enable" } else { "disable" };
+        let (ok, stderr) = cli.run_plugin_subcommand(&[subcmd, plugin_name])?;
+        if !ok { return Err(format!("Plugin {} failed: {}", subcmd, stderr)); }
+        Ok(())
+    }
+
+    pub fn list_marketplace() -> Result<Vec<MarketplacePlugin>, String> {
+        // No marketplace browsing available — agy has no search/browse command.
+        Ok(Vec::new())
+    }
+
+    pub fn install(cli: &'static dyn CliRunner, name: &str, marketplace: &str) -> Result<(), String> {
+        let plugin_id = format!("{}@{}", name, marketplace);
+        let (ok, stderr) = cli.run_plugin_subcommand(&["install", &plugin_id])?;
+        if !ok { return Err(format!("Install failed: {}", stderr)); }
+        Ok(())
+    }
+
+    pub fn uninstall(cli: &'static dyn CliRunner, name: &str) -> Result<(), String> {
+        let (ok, stderr) = cli.run_plugin_subcommand(&["uninstall", name])?;
+        if !ok { return Err(format!("Uninstall failed: {}", stderr)); }
+        Ok(())
     }
 }

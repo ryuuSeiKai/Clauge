@@ -7,7 +7,7 @@ pub const KIND: &str = "explorer";
 pub async fn build_payload(pool: &SqlitePool) -> Result<SyncPayload, String> {
     let mut payload = empty_payload(KIND);
     // Per migration 8: kind-discriminated columns; secrets are NOT in this
-    // table at all — they're in keychain under service "Clauge Explorer".
+    // table at all — they're in keychain under service "Synape Explorer".
     // The `last_used_at` is machine-local so we exclude it.
     payload.tables.insert(
         "explorer_connections".into(),

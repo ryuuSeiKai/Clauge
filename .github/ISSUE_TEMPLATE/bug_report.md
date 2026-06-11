@@ -1,14 +1,14 @@
 ---
 name: Bug Report
-about: Report a bug to help us improve Clauge
+about: Report a bug to help us improve Synape
 title: "[BUG] "
 labels: bug
 assignees: ansxuman
 ---
 
 ## Pre-flight
-- [ ] I am running the latest Clauge release
-- [ ] I searched [existing issues](https://github.com/ansxuman/Clauge/issues?q=is%3Aissue) and didn't find a duplicate
+- [ ] I am running the latest Synape release
+- [ ] I searched [existing issues](https://github.com/ansxuman/Synape/issues?q=is%3Aissue) and didn't find a duplicate
 
 ## Affected Mode / Area
 <!-- Delete the ones that don't apply. -->
@@ -33,7 +33,7 @@ What actually happened. Include error messages, stack traces, or panics if any.
 
 ## Environment
 - **OS**: <!-- e.g. macOS 15.3, Windows 11 23H2, Ubuntu 24.04 -->
-- **Clauge Version**: <!-- Settings → About, or the title bar -->
+- **Synape Version**: <!-- Settings → About, or the title bar -->
 - **Architecture**: <!-- arm64, x86_64 -->
 - **Install source**: <!-- DMG, MSI, .deb, built from source -->
 

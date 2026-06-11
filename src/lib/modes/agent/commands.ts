@@ -54,7 +54,7 @@ export const agentInjectContexts = (projectPath: string, contextIds: string[], p
   invoke<void>('agent_inject_contexts', { projectPath, contextIds, provider });
 export const agentRemoveInjectedContexts = (projectPath: string) => invoke<void>('agent_remove_injected_contexts', { projectPath });
 /** Write the session's purpose prompt into the provider's project-level
- *  context file (e.g. GEMINI.md) within a Clauge-managed marker block.
+ *  context file (e.g. GEMINI.md) within a Synape-managed marker block.
  *  Currently only takes effect for Gemini — every other provider has a
  *  real system-prompt flag and uses it directly at spawn. Safe to call
  *  for any provider; non-Gemini calls are no-ops on the Rust side. */
@@ -80,6 +80,13 @@ export const agentSpawnShell = (projectPath: string, onOutput: any) => invoke<st
 export const agentWriteToTerminal = (terminalId: string, data: string) => invoke<void>('agent_write_to_terminal', { terminalId, data });
 export const agentResizeTerminal = (terminalId: string, cols: number, rows: number) => invoke<void>('agent_resize_terminal', { terminalId, cols, rows });
 export const agentKillTerminal = (terminalId: string) => invoke<void>('agent_kill_terminal', { terminalId });
+export const agentOpenNativeTerminal = (params: {
+  projectPath: string;
+  provider?: string;
+  sessionId?: string | null;
+  skipPermissions?: boolean;
+  binaryPath?: string | null;
+}) => invoke<void>('agent_open_native_terminal', params);
 
 // Worktree
 export const agentIsGitRepo = (path: string) => invoke<boolean>('agent_is_git_repo', { path });

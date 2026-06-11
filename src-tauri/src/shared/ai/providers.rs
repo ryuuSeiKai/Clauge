@@ -9,6 +9,10 @@
 // constants from `commands/ai/{anthropic,openai,mod}.rs`, lifted into data.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::sync::LazyLock;
+
+use crate::cloud::config::api_base_url;
 
 /// Identifies a provider. Serde representation matches the string the
 /// frontend sends (`ai_provider` in settings) and uses for the
@@ -35,8 +39,8 @@ pub enum ProviderId {
     /// when invoking ai_chat is actually the user's cloud Bearer token; the
     /// X-Provider header (github / google) is passed via the extra_headers
     /// path so the worker can validate against the right JWKS.
-    #[serde(rename = "clauge")]
-    Clauge,
+    #[serde(rename = "Synape")]
+    Synape,
 }
 
 impl ProviderId {
@@ -52,7 +56,7 @@ impl ProviderId {
             ProviderId::OpenRouter => "openrouter",
             ProviderId::OpenAI => "openai_direct",
             ProviderId::Gemini => "gemini",
-            ProviderId::Clauge => "clauge",
+            ProviderId::Synape => "Synape",
         }
     }
 
@@ -67,7 +71,7 @@ impl ProviderId {
             "openrouter" => Some(ProviderId::OpenRouter),
             "openai_direct" => Some(ProviderId::OpenAI),
             "gemini" => Some(ProviderId::Gemini),
-            "clauge" => Some(ProviderId::Clauge),
+            "Synape" => Some(ProviderId::Synape),
             _ => None,
         }
     }
@@ -92,7 +96,7 @@ pub struct ProviderConfig {
     pub provider_id: ProviderId,
     pub model_id: &'static str,
     pub display_name: &'static str,
-    pub api_url: &'static str,
+    pub api_url: Cow<'static, str>,
     pub api_kind: ApiKind,
     pub max_input_tokens: u32,
     pub max_output_tokens: u32,
@@ -111,166 +115,168 @@ pub struct ProviderConfig {
 }
 
 /// The registry. Order matters for `list_all_providers` (UI ordering).
-const REGISTRY: &[ProviderConfig] = &[
-    ProviderConfig {
-        provider_id: ProviderId::Claude,
-        model_id: "claude-haiku-4-5-20251001",
-        display_name: "Claude Haiku 4.5",
-        api_url: "https://api.anthropic.com/v1/messages",
-        api_kind: ApiKind::AnthropicMessages,
-        max_input_tokens: 200_000,
-        max_output_tokens: 4096,
-        default_temperature: 1.0,
-        supports_caching: true,
-        supports_parallel_tools: false,
-        supports_thinking: true,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_claude",
-        anthropic_version: Some("2023-06-01"),
-        key_prefix: Some("sk-ant-"),
-    },
-    ProviderConfig {
-        provider_id: ProviderId::Groq,
-        model_id: "meta-llama/llama-4-scout-17b-16e-instruct",
-        display_name: "Llama 4 Scout 17B (Groq)",
-        api_url: "https://api.groq.com/openai/v1/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 128_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_groq",
-        anthropic_version: None,
-        key_prefix: Some("gsk_"),
-    },
-    ProviderConfig {
-        provider_id: ProviderId::Mistral,
-        model_id: "mistral-large-latest",
-        display_name: "Mistral Large",
-        api_url: "https://api.mistral.ai/v1/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 128_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_mistral",
-        anthropic_version: None,
-        key_prefix: None,
-    },
-    ProviderConfig {
-        provider_id: ProviderId::OpenAIGitHub,
-        model_id: "gpt-4.1-mini",
-        display_name: "GPT-4.1 Mini (GitHub Models)",
-        api_url: "https://models.inference.ai.azure.com/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 128_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_openai_gh",
-        anthropic_version: None,
-        key_prefix: None,
-    },
-    ProviderConfig {
-        provider_id: ProviderId::Nvidia,
-        model_id: "nvidia/nemotron-3-super-120b-a12b",
-        display_name: "Nemotron 3 Super 120B (NVIDIA NIM)",
-        api_url: "https://integrate.api.nvidia.com/v1/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 128_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_nvidia",
-        anthropic_version: None,
-        key_prefix: None,
-    },
-    ProviderConfig {
-        provider_id: ProviderId::OpenRouter,
-        model_id: "meta-llama/llama-3.3-70b-instruct:free",
-        display_name: "Llama 3.3 70B (OpenRouter)",
-        api_url: "https://openrouter.ai/api/v1/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 128_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_openrouter",
-        anthropic_version: None,
-        key_prefix: None,
-    },
-    ProviderConfig {
-        provider_id: ProviderId::OpenAI,
-        model_id: "gpt-4.1-mini",
-        display_name: "GPT-4.1 Mini",
-        api_url: "https://api.openai.com/v1/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 128_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_openai_direct",
-        anthropic_version: None,
-        key_prefix: Some("sk-"),
-    },
-    ProviderConfig {
-        provider_id: ProviderId::Gemini,
-        model_id: "gemini-3.1-flash-lite",
-        display_name: "Gemini 3.1 Flash-Lite",
-        api_url: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 1_000_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "ai_api_key_gemini",
-        anthropic_version: None,
-        key_prefix: None,
-    },
-    // Clauge AI — managed assistance routed through our worker. The worker
-    // is OpenAI-compatible, so the same stream_openai client drives it.
-    // model_id is a placeholder; the worker injects its own env-configured
-    // model. Auth uses the user's cloud Bearer token (passed as api_key)
-    // plus an X-Provider header (passed via extra_headers).
-    ProviderConfig {
-        provider_id: ProviderId::Clauge,
-        model_id: "clauge-managed",
-        display_name: "Clauge AI",
-        api_url: "https://clauge.in/api/ai/chat",
-        api_kind: ApiKind::OpenAICompat,
-        max_input_tokens: 200_000,
-        max_output_tokens: 4096,
-        default_temperature: 0.1,
-        supports_caching: false,
-        supports_parallel_tools: true,
-        supports_thinking: false,
-        daily_token_budget: None,
-        key_setting_name: "",
-        anthropic_version: None,
-        key_prefix: None,
-    },
-];
+static REGISTRY: LazyLock<&'static [ProviderConfig]> = LazyLock::new(|| {
+    Box::leak(vec![
+        ProviderConfig {
+            provider_id: ProviderId::Claude,
+            model_id: "claude-haiku-4-5-20251001",
+            display_name: "Claude Haiku 4.5",
+            api_url: Cow::Borrowed("https://api.anthropic.com/v1/messages"),
+            api_kind: ApiKind::AnthropicMessages,
+            max_input_tokens: 200_000,
+            max_output_tokens: 4096,
+            default_temperature: 1.0,
+            supports_caching: true,
+            supports_parallel_tools: false,
+            supports_thinking: true,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_claude",
+            anthropic_version: Some("2023-06-01"),
+            key_prefix: Some("sk-ant-"),
+        },
+        ProviderConfig {
+            provider_id: ProviderId::Groq,
+            model_id: "meta-llama/llama-4-scout-17b-16e-instruct",
+            display_name: "Llama 4 Scout 17B (Groq)",
+            api_url: Cow::Borrowed("https://api.groq.com/openai/v1/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 128_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_groq",
+            anthropic_version: None,
+            key_prefix: Some("gsk_"),
+        },
+        ProviderConfig {
+            provider_id: ProviderId::Mistral,
+            model_id: "mistral-large-latest",
+            display_name: "Mistral Large",
+            api_url: Cow::Borrowed("https://api.mistral.ai/v1/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 128_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_mistral",
+            anthropic_version: None,
+            key_prefix: None,
+        },
+        ProviderConfig {
+            provider_id: ProviderId::OpenAIGitHub,
+            model_id: "gpt-4.1-mini",
+            display_name: "GPT-4.1 Mini (GitHub Models)",
+            api_url: Cow::Borrowed("https://models.inference.ai.azure.com/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 128_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_openai_gh",
+            anthropic_version: None,
+            key_prefix: None,
+        },
+        ProviderConfig {
+            provider_id: ProviderId::Nvidia,
+            model_id: "nvidia/nemotron-3-super-120b-a12b",
+            display_name: "Nemotron 3 Super 120B (NVIDIA NIM)",
+            api_url: Cow::Borrowed("https://integrate.api.nvidia.com/v1/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 128_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_nvidia",
+            anthropic_version: None,
+            key_prefix: None,
+        },
+        ProviderConfig {
+            provider_id: ProviderId::OpenRouter,
+            model_id: "meta-llama/llama-3.3-70b-instruct:free",
+            display_name: "Llama 3.3 70B (OpenRouter)",
+            api_url: Cow::Borrowed("https://openrouter.ai/api/v1/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 128_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_openrouter",
+            anthropic_version: None,
+            key_prefix: None,
+        },
+        ProviderConfig {
+            provider_id: ProviderId::OpenAI,
+            model_id: "gpt-4.1-mini",
+            display_name: "GPT-4.1 Mini",
+            api_url: Cow::Borrowed("https://api.openai.com/v1/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 128_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_openai_direct",
+            anthropic_version: None,
+            key_prefix: Some("sk-"),
+        },
+        ProviderConfig {
+            provider_id: ProviderId::Gemini,
+            model_id: "gemini-3.1-flash-lite",
+            display_name: "Gemini 3.1 Flash-Lite",
+            api_url: Cow::Borrowed("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 1_000_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "ai_api_key_gemini",
+            anthropic_version: None,
+            key_prefix: None,
+        },
+        // Synape AI — managed assistance routed through our worker. The worker
+        // is OpenAI-compatible, so the same stream_openai client drives it.
+        // model_id is a placeholder; the worker injects its own env-configured
+        // model. Auth uses the user's cloud Bearer token (passed as api_key)
+        // plus an X-Provider header (passed via extra_headers).
+        ProviderConfig {
+            provider_id: ProviderId::Synape,
+            model_id: "Synape-managed",
+            display_name: "Synape AI",
+            api_url: Cow::Owned(api_base_url() + "/api/ai/chat"),
+            api_kind: ApiKind::OpenAICompat,
+            max_input_tokens: 200_000,
+            max_output_tokens: 4096,
+            default_temperature: 0.1,
+            supports_caching: false,
+            supports_parallel_tools: true,
+            supports_thinking: false,
+            daily_token_budget: None,
+            key_setting_name: "",
+            anthropic_version: None,
+            key_prefix: None,
+        },
+    ].into_boxed_slice())
+});
 
 /// Look up an exact (provider, model) pair.
 pub fn get_provider_config(provider: ProviderId, model: &str) -> Option<&'static ProviderConfig> {
@@ -299,7 +305,7 @@ pub fn list_models_for(provider: ProviderId) -> Vec<&'static ProviderConfig> {
 #[allow(dead_code)]
 pub fn list_all_providers() -> Vec<ProviderId> {
     let mut seen: Vec<ProviderId> = Vec::new();
-    for cfg in REGISTRY {
+    for cfg in *REGISTRY {
         if !seen.contains(&cfg.provider_id) {
             seen.push(cfg.provider_id);
         }

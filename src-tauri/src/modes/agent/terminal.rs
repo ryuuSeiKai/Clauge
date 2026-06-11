@@ -88,7 +88,7 @@ pub async fn agent_spawn_terminal(
     if let Some(ref email) = git_email { cmd.env("GIT_AUTHOR_EMAIL", email); cmd.env("GIT_COMMITTER_EMAIL", email); }
 
     // Codex registers the workspace MCP with `--bearer-token-env-var
-    // CLAUGE_WORKSPACE_TOKEN` (see modes/workspace/commands.rs
+    // Synape_WORKSPACE_TOKEN` (see modes/workspace/commands.rs
     // ::register_codex). Inject the persisted token into the env
     // exactly when we're spawning codex, so codex can authenticate
     // without the token ever touching ~/.codex/config.toml.
@@ -218,4 +218,77 @@ pub fn agent_kill_terminal(state: State<'_, TerminalState>, terminal_id: String)
     let mut terminals = state.terminals.lock();
     if let Some(mut entry) = terminals.remove(&terminal_id) { let _ = entry.child.kill(); }
     Ok(())
+}
+
+/// Open the native macOS Terminal.app (or iTerm2 if installed), cd to
+/// `project_path`, and start the CLI agent so the user can type Vietnamese
+/// without WKWebView IME restrictions.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn agent_open_native_terminal(
+    project_path: String,
+    provider: Option<String>,
+    session_id: Option<String>,
+    skip_permissions: Option<bool>,
+    binary_path: Option<String>,
+) -> Result<(), String> {
+    use crate::shared::cli::registry::runner_for;
+    use crate::shared::cli::runner::SpawnOpts;
+
+    let path = if project_path.is_empty() {
+        dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+    } else {
+        project_path
+    };
+
+    // Build the full CLI spawn command
+    let provider = provider.unwrap_or_else(|| "claude".to_string());
+    let cli: &dyn crate::shared::cli::runner::CliRunner = runner_for(&provider);
+    let spawn_cmd = cli.build_spawn_command(&SpawnOpts {
+        resume_session_id: session_id,
+        system_prompt: None,
+        skip_permissions: skip_permissions.unwrap_or(false),
+        binary_path_override: binary_path
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+    });
+
+    // Prefer iTerm2 if installed, otherwise fall back to Terminal.app.
+    let app = if std::path::Path::new("/Applications/iTerm.app").exists()
+        || std::path::Path::new(&format!(
+            "{}/Applications/iTerm.app",
+            dirs::home_dir().map(|p| p.to_string_lossy().to_string()).unwrap_or_default()
+        )).exists()
+    {
+        "iTerm"
+    } else {
+        "Terminal"
+    };
+
+    // Escape single quotes in path and command for AppleScript
+    let safe_path = path.replace('\'', "'\\''");
+    let safe_cmd = spawn_cmd.replace('\'', "'\\''");
+
+    let script = format!(
+        "tell application \"{app}\" to activate\n\
+         tell application \"{app}\" to do script \"cd '{safe_path}' && clear && echo '→ {app}' && {safe_cmd}\"",
+    );
+
+    let mut cmd = std::process::Command::new("osascript");
+    cmd.arg("-e").arg(&script);
+    cmd.spawn().map_err(|e| format!("Failed to open native terminal: {}", e))?;
+    Ok(())
+}
+
+/// Non-macOS stub — returns an error with a helpful message.
+#[cfg(not(target_os = "macos"))]
+#[tauri::command]
+pub fn agent_open_native_terminal(
+    _project_path: String, _provider: Option<String>,
+    _session_id: Option<String>, _skip_permissions: Option<bool>,
+    _binary_path: Option<String>,
+) -> Result<(), String> {
+    Err("Native terminal is only supported on macOS. Use the embedded terminal instead.".to_string())
 }

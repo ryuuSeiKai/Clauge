@@ -32,7 +32,7 @@ use tauri::AppHandle;
 use tauri::Manager;
 
 use crate::cloud::auth::AuthState;
-use crate::cloud::config::API_BASE_URL;
+use crate::cloud::config::api_base_url;
 use crate::shared::repos::settings as settings_repo;
 use crate::telemetry::counters::{drain, restore};
 use crate::telemetry::device::fingerprint;
@@ -113,7 +113,7 @@ async fn flush_once(_app: &AppHandle, pool: &SqlitePool) {
         .try_state::<AuthState>()
         .and_then(|s| s.active_token_and_provider());
 
-    let endpoint = format!("{}/api/telemetry/heartbeat", API_BASE_URL);
+    let endpoint = format!("{}/api/telemetry/heartbeat", api_base_url());
     let client = match reqwest::Client::builder().timeout(HTTP_TIMEOUT).build() {
         Ok(c) => c,
         Err(e) => {

@@ -433,7 +433,7 @@
     }
 
     // Copy actions — most useful link is the host URL when present,
-    // falling back to a clauge:// card link so other panes can
+    // falling back to a Synape:// card link so other panes can
     // navigate back here.
     items.push({
       label: card.prUrl ? 'Copy PR URL' : card.externalUrl ? 'Copy issue URL' : 'Copy card title',

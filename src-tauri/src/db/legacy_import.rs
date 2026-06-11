@@ -1,18 +1,18 @@
-//! One-time import of pre-database Clauge data into the SQLite store.
+//! One-time import of pre-database Synape data into the SQLite store.
 //!
-//! Older Clauge builds stored agent sessions and contexts as JSON / Markdown
-//! files under `~/.clauge/`:
-//!   - `~/.clauge/sessions.json`     — array of agent session profiles
-//!   - `~/.clauge/contexts/*.md`     — context snippets, filename = name
-//!   - `~/.clauge/session_key`       — Anthropic session key for usage stats
+//! Older Synape builds stored agent sessions and contexts as JSON / Markdown
+//! files under `~/.Synape/`:
+//!   - `~/.Synape/sessions.json`     — array of agent session profiles
+//!   - `~/.Synape/contexts/*.md`     — context snippets, filename = name
+//!   - `~/.Synape/session_key`       — Anthropic session key for usage stats
 //!
 //! After the SQLite store landed (migration v4), this module bridges the
 //! gap: on first launch of the new code, it imports the JSON/MD files into
 //! `agent_sessions` / `agent_contexts` / `agent_session_contexts`, copies
 //! the session key into `settings`, and archives the originals to
-//! `~/.clauge/backup/` so a re-run can't double-import.
+//! `~/.Synape/backup/` so a re-run can't double-import.
 //!
-//! Idempotent via the `clauge_migration_done` row in `settings`. Safe to
+//! Idempotent via the `Synape_migration_done` row in `settings`. Safe to
 //! call on every boot; runs the actual work at most once per machine.
 
 use std::collections::HashMap;
@@ -20,17 +20,17 @@ use std::path::Path;
 
 use sqlx::sqlite::SqlitePool;
 
-const DONE_KEY: &str = "clauge_migration_done";
+const DONE_KEY: &str = "Synape_migration_done";
 
-/// Run the import if a `~/.clauge/sessions.json` exists and we haven't
+/// Run the import if a `~/.Synape/sessions.json` exists and we haven't
 /// already imported it on this database. Failures inside any step are
 /// best-effort — partial imports are preferable to refusing to launch.
 pub async fn run_if_needed(pool: &SqlitePool) {
     let Some(home) = dirs::home_dir() else {
         return;
     };
-    let clauge_dir = home.join(".clauge");
-    let sessions_json = clauge_dir.join("sessions.json");
+    let Synape_dir = home.join(".Synape");
+    let sessions_json = Synape_dir.join("sessions.json");
 
     if !sessions_json.exists() {
         return;
@@ -40,14 +40,14 @@ pub async fn run_if_needed(pool: &SqlitePool) {
     }
 
     // Step 1: contexts first so we have IDs to link sessions against.
-    let contexts_dir = clauge_dir.join("contexts");
+    let contexts_dir = Synape_dir.join("contexts");
     let context_name_to_id = import_contexts(pool, &contexts_dir).await;
 
     // Step 2: sessions + their context attachments.
     import_sessions(pool, &sessions_json, &context_name_to_id).await;
 
     // Step 3: session key.
-    let key_path = clauge_dir.join("session_key");
+    let key_path = Synape_dir.join("session_key");
     import_session_key(pool, &key_path).await;
 
     // Step 4: mark done so subsequent boots short-circuit.
@@ -57,7 +57,7 @@ pub async fn run_if_needed(pool: &SqlitePool) {
         .await;
 
     // Step 5: archive originals.
-    archive_legacy_files(&clauge_dir, &sessions_json, &key_path, &contexts_dir);
+    archive_legacy_files(&Synape_dir, &sessions_json, &key_path, &contexts_dir);
 }
 
 async fn already_done(pool: &SqlitePool) -> bool {
@@ -204,12 +204,12 @@ async fn import_session_key(pool: &SqlitePool, key_path: &Path) {
 }
 
 fn archive_legacy_files(
-    clauge_dir: &Path,
+    Synape_dir: &Path,
     sessions_json: &Path,
     key_path: &Path,
     contexts_dir: &Path,
 ) {
-    let backup = clauge_dir.join("backup");
+    let backup = Synape_dir.join("backup");
     let _ = std::fs::create_dir_all(&backup);
     let _ = std::fs::rename(sessions_json, backup.join("sessions.json"));
     if key_path.exists() {

@@ -42,11 +42,23 @@ export interface MissingCredentials {
 export const cloudProbeMissingCredentials = () =>
   invoke<MissingCredentials>('cloud_probe_missing_credentials');
 
-export const cloudGithubLoginUrl = () =>
-  invoke<string>('cloud_github_login_url');
+export const cloudGithubLoginUrl = (state: string) =>
+  invoke<string>('cloud_github_login_url', { state });
 
-export const cloudGoogleLoginUrl = () =>
-  invoke<string>('cloud_google_login_url');
+export const cloudGoogleLoginUrl = (state: string) =>
+  invoke<string>('cloud_google_login_url', { state });
+
+export const cloudCreateTicket = () =>
+  invoke<string>('cloud_create_ticket');
+
+export interface TicketPollResult {
+  status: string;
+  token?: string;
+  userId?: number;
+}
+
+export const cloudPollTicket = (ticket: string) =>
+  invoke<TicketPollResult>('cloud_poll_ticket', { ticket });
 
 export const cloudExchangeCode = (provider: Provider, code: string) =>
   invoke<CloudStatus>('cloud_exchange_code', { provider, code });
@@ -90,6 +102,12 @@ export const cloudPullIfRemoteNewer = () =>
 
 export const cloudLocalHasData = () =>
   invoke<boolean>('cloud_local_has_data');
+
+export const cloudSetApiUrl = (url: string | null) =>
+  invoke<void>('cloud_set_api_url', { url });
+
+export const cloudGetApiUrl = () =>
+  invoke<string>('cloud_get_api_url');
 
 export const cloudLogout = () =>
   invoke<void>('cloud_logout');
