@@ -93,6 +93,14 @@
         type ProviderId,
     } from "$lib/shared/ai/providers";
     import { isMac, mod } from "$lib/utils/platform";
+    import {
+        cloudInstallSkill,
+        cloudUninstallSkill,
+        cloudListInstalledSkills,
+        cloudFetchMarketplaceSkills,
+        cloudFetchSkillContent,
+        type InstalledSkill,
+    } from "$lib/commands/cloud";
 
     // 'general' is app-wide (currently: Proxy — applies to REST + AI + GitHub
     // + Updater + ClickHouse). 'rest' holds REST-only knobs (timeout, redirects,
@@ -1224,6 +1232,72 @@
     let editContextContent = $state("");
     let isNewContext = $state(false);
     let deleteConfirmId = $state<string | null>(null);
+
+    // Agent Skills
+    interface Skill {
+        name: string;
+        category: string;
+        url: string;
+        title: string;
+        description?: string;
+        tags?: string[];
+    }
+
+    let marketplaceSkills = $state<Skill[]>([]);
+    let installedSkills = $state<InstalledSkill[]>([]);
+    let skillCategories = $state<Record<string, string>>({});
+    let loadingSkills = $state(false);
+    let selectedCategory = $state<string>("all");
+    let installingSkill = $state<string | null>(null);
+    let skillSubTab = $state<"marketplace" | "installed">("marketplace");
+
+    async function loadMarketplaceSkills() {
+        loadingSkills = true;
+        try {
+            const resp = await cloudFetchMarketplaceSkills();
+            marketplaceSkills = resp.skills || [];
+            skillCategories = resp.categories || {};
+        } catch (e) {
+            console.warn("Failed to load marketplace skills:", e);
+        } finally {
+            loadingSkills = false;
+        }
+    }
+
+    async function loadInstalledSkills() {
+        try {
+            installedSkills = await cloudListInstalledSkills();
+        } catch { /* ignore */ }
+    }
+
+    async function installMarketplaceSkill(skill: Skill) {
+        installingSkill = skill.name;
+        try {
+            const content = await cloudFetchSkillContent(skill.url);
+            await cloudInstallSkill(skill.name, content);
+            await loadInstalledSkills();
+        } catch (e) {
+            showToast("Failed to install skill: " + String(e), "error");
+        } finally {
+            installingSkill = null;
+        }
+    }
+
+    async function uninstallSkill(name: string) {
+        try {
+            await cloudUninstallSkill(name);
+            await loadInstalledSkills();
+        } catch (e) {
+            showToast("Failed to uninstall skill: " + String(e), "error");
+        }
+    }
+
+    $effect(() => {
+        if (pluginProvider === "antigravity") {
+            loadMarketplaceSkills();
+            loadInstalledSkills();
+        }
+    });
 
     // Provider tabs. Claude uses marketplace-directory + CLI subcommand
     // model; Codex's plugin lifecycle lives in its TUI (`/plugins`
@@ -3948,7 +4022,7 @@
                          have a Synape-side marketplace browser (installs
                          happen inside the codex TUI), so we hide that
                          half of the toggle and show only Installed. -->
-                                    {#if pluginProvider !== "codex"}
+                                    {#if pluginProvider !== "codex" && pluginProvider !== "antigravity"}
                                         <div class="agent-plugin-views">
                                             <button
                                                 class="ai-action-btn"
@@ -4012,157 +4086,221 @@
                                                 can be enabled or disabled.
                                             </span>
                                         </div>
+                                    {:else if pluginProvider === "antigravity"}
+                                        <div class="skill-marketplace">
+                                            <div class="skill-tabs" role="tablist">
+                                                <button
+                                                    class="skill-tab"
+                                                    class:active={skillSubTab === "marketplace"}
+                                                    onclick={() => (skillSubTab = "marketplace")}
+                                                    >Marketplace ({marketplaceSkills.length})</button
+                                                >
+                                                <button
+                                                    class="skill-tab"
+                                                    class:active={skillSubTab === "installed"}
+                                                    onclick={() => (skillSubTab = "installed")}
+                                                    >Installed ({installedSkills.length})</button
+                                                >
+                                            </div>
+
+                                            {#if skillSubTab === "marketplace"}
+                                                <div class="skill-filters">
+                                                    <select bind:value={selectedCategory} class="skill-category-select">
+                                                        <option value="all">All Categories</option>
+                                                        {#each Object.entries(skillCategories) as [slug, label]}
+                                                            <option value={slug}>{label}</option>
+                                                        {/each}
+                                                    </select>
+                                                </div>
+
+                                                <div class="skill-grid">
+                                                    {#each marketplaceSkills.filter(s => selectedCategory === "all" || s.category === selectedCategory) as skill}
+                                                        <div class="skill-card">
+                                                            <div class="skill-card-header">
+                                                                <strong>{skill.title || skill.name}</strong>
+                                                                <span class="skill-category-badge">{skillCategories[skill.category] || skill.category}</span>
+                                                            </div>
+                                                            <div class="skill-card-actions">
+                                                                {#if installedSkills.find(s => s.name === skill.name)}
+                                                                    <button class="btn-small btn-installed" disabled>Installed</button>
+                                                                {:else if installingSkill === skill.name}
+                                                                    <button class="btn-small" disabled>Installing...</button>
+                                                                {:else}
+                                                                    <button class="btn-small btn-primary" onclick={() => installMarketplaceSkill(skill)}>Install</button>
+                                                                {/if}
+                                                            </div>
+                                                        </div>
+                                                    {/each}
+                                                </div>
+                                            {:else}
+                                                <div class="installed-skills-list">
+                                                    {#if installedSkills.length === 0}
+                                                        <p class="empty-state">No installed skills. Browse the Marketplace tab.</p>
+                                                    {:else}
+                                                        {#each installedSkills as skill}
+                                                            <div class="installed-skill-item">
+                                                                <span class="skill-name">{skill.name}</span>
+                                                                <span class="skill-size">{(skill.size / 1024).toFixed(1)} KB</span>
+                                                                <button class="btn-small btn-danger" onclick={() => uninstallSkill(skill.name)}>Uninstall</button>
+                                                            </div>
+                                                        {/each}
+                                                    {/if}
+                                                </div>
+                                            {/if}
+                                        </div>
                                     {/if}
 
-                                    {#if pluginView === "installed"}
-                                        {#if installedPlugins.length === 0}
-                                            <div class="ai-usage-empty">
-                                                <svg
-                                                    viewBox="0 0 24 24"
-                                                    width="36"
-                                                    height="36"
-                                                    fill="none"
-                                                    stroke="var(--t4)"
-                                                    stroke-width="1.2"
-                                                    stroke-linecap="round"
-                                                    stroke-linejoin="round"
-                                                    ><path
-                                                        d="M20.5 7.27783L12 12.0001M12 12.0001L3.49997 7.27783M12 12.0001L12 21.5001M14 20.6701L12.7 21.4001C12.2 21.6001 11.8 21.6001 11.3 21.4001L4.8 17.7001C4.3 17.4001 4 16.9001 4 16.3001V7.70011C4 7.10011 4.3 6.60011 4.8 6.30011L11.3 2.60011C11.8 2.40011 12.2 2.40011 12.7 2.60011L19.2 6.30011C19.7 6.60011 20 7.10011 20 7.70011V16.3001"
-                                                    /></svg
-                                                >
-                                                <p>No plugins installed</p>
-                                                <span
-                                                    >Browse the marketplace to
-                                                    install plugins</span
-                                                >
-                                            </div>
-                                        {:else}
-                                            <div class="agent-plugin-list">
-                                                {#each installedPlugins as plugin}
-                                                    <div
-                                                        class="agent-plugin-card"
+                                    {#if pluginProvider !== "antigravity"}
+                                        {#if pluginView === "installed"}
+                                            {#if installedPlugins.length === 0}
+                                                <div class="ai-usage-empty">
+                                                    <svg
+                                                        viewBox="0 0 24 24"
+                                                        width="36"
+                                                        height="36"
+                                                        fill="none"
+                                                        stroke="var(--t4)"
+                                                        stroke-width="1.2"
+                                                        stroke-linecap="round"
+                                                        stroke-linejoin="round"
+                                                        ><path
+                                                            d="M20.5 7.27783L12 12.0001M12 12.0001L3.49997 7.27783M12 12.0001L12 21.5001M14 20.6701L12.7 21.4001C12.2 21.6001 11.8 21.6001 11.3 21.4001L4.8 17.7001C4.3 17.4001 4 16.9001 4 16.3001V7.70011C4 7.10011 4.3 6.60011 4.8 6.30011L11.3 2.60011C11.8 2.40011 12.2 2.40011 12.7 2.60011L19.2 6.30011C19.7 6.60011 20 7.10011 20 7.70011V16.3001"
+                                                        /></svg
                                                     >
+                                                    <p>No plugins installed</p>
+                                                    <span
+                                                        >Browse the marketplace to
+                                                        install plugins</span
+                                                    >
+                                                </div>
+                                            {:else}
+                                                <div class="agent-plugin-list">
+                                                    {#each installedPlugins as plugin}
                                                         <div
-                                                            class="agent-plugin-info"
+                                                            class="agent-plugin-card"
                                                         >
-                                                            <span
-                                                                class="agent-plugin-name"
-                                                                >{plugin.name}</span
+                                                            <div
+                                                                class="agent-plugin-info"
                                                             >
-                                                            <span
-                                                                class="agent-plugin-meta"
-                                                            >
-                                                                {plugin.marketplace}
-                                                                {#if plugin.version}
-                                                                    <span
-                                                                        class="ai-link-sep"
-                                                                        >&middot;</span
-                                                                    >
-                                                                    v{plugin.version}
-                                                                {/if}
-                                                            </span>
-                                                        </div>
-                                                        <div
-                                                            class="agent-plugin-actions"
-                                                        >
-                                                            <label
-                                                                class="stg-toggle"
-                                                            >
-                                                                <input
-                                                                    type="checkbox"
-                                                                    checked={plugin.enabled}
-                                                                    onchange={() =>
-                                                                        handleTogglePlugin(
-                                                                            plugin.name,
-                                                                            !plugin.enabled,
-                                                                        )}
-                                                                />
                                                                 <span
-                                                                    class="stg-toggle-slider"
-                                                                ></span>
-                                                            </label>
-                                                            <button
-                                                                class="ai-action-btn danger sm"
-                                                                onclick={() =>
-                                                                    handleUninstallPlugin(
-                                                                        plugin.name,
-                                                                        plugin.marketplace,
-                                                                    )}
-                                                            >
-                                                                Uninstall
-                                                            </button>
-                                                        </div>
-                                                    </div>
-                                                {/each}
-                                            </div>
-                                        {/if}
-                                    {:else}
-                                        <div class="agent-marketplace-search">
-                                            <input
-                                                class="stg-input"
-                                                type="text"
-                                                style="width: 100%;"
-                                                placeholder="Search plugins..."
-                                                bind:value={pluginSearchQuery}
-                                            />
-                                        </div>
-                                        {#if filteredMarketplacePlugins.length === 0}
-                                            <div class="ai-usage-empty">
-                                                <p>No plugins found</p>
-                                            </div>
-                                        {:else}
-                                            <div class="agent-plugin-list">
-                                                {#each filteredMarketplacePlugins as plugin}
-                                                    <div
-                                                        class="agent-plugin-card"
-                                                    >
-                                                        <div
-                                                            class="agent-plugin-info"
-                                                        >
-                                                            <span
-                                                                class="agent-plugin-name"
-                                                                >{plugin.name}</span
-                                                            >
-                                                            <span
-                                                                class="agent-plugin-desc"
-                                                                >{plugin.description}</span
-                                                            >
-                                                            {#if plugin.installs != null}
+                                                                    class="agent-plugin-name"
+                                                                    >{plugin.name}</span
+                                                                >
                                                                 <span
                                                                     class="agent-plugin-meta"
-                                                                    >{plugin.installs.toLocaleString()}
-                                                                    installs</span
                                                                 >
-                                                            {/if}
-                                                        </div>
-                                                        <div
-                                                            class="agent-plugin-actions"
-                                                        >
-                                                            {#if plugin.installed}
-                                                                <span
-                                                                    class="ai-status-badge"
-                                                                >
-                                                                    <span
-                                                                        class="ai-status-dot"
-                                                                    ></span>
-                                                                    Installed
+                                                                    {plugin.marketplace}
+                                                                    {#if plugin.version}
+                                                                        <span
+                                                                            class="ai-link-sep"
+                                                                            >&middot;</span
+                                                                        >
+                                                                        v{plugin.version}
+                                                                    {/if}
                                                                 </span>
-                                                            {:else}
+                                                            </div>
+                                                            <div
+                                                                class="agent-plugin-actions"
+                                                            >
+                                                                <label
+                                                                    class="stg-toggle"
+                                                                >
+                                                                    <input
+                                                                        type="checkbox"
+                                                                        checked={plugin.enabled}
+                                                                        onchange={() =>
+                                                                            handleTogglePlugin(
+                                                                                plugin.name,
+                                                                                !plugin.enabled,
+                                                                            )}
+                                                                    />
+                                                                    <span
+                                                                        class="stg-toggle-slider"
+                                                                    ></span>
+                                                                </label>
                                                                 <button
-                                                                    class="ai-action-btn primary sm"
+                                                                    class="ai-action-btn danger sm"
                                                                     onclick={() =>
-                                                                        handleInstallPlugin(
+                                                                        handleUninstallPlugin(
                                                                             plugin.name,
                                                                             plugin.marketplace,
                                                                         )}
                                                                 >
-                                                                    Install
+                                                                    Uninstall
                                                                 </button>
-                                                            {/if}
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                {/each}
+                                                    {/each}
+                                                </div>
+                                            {/if}
+                                        {:else}
+                                            <div class="agent-marketplace-search">
+                                                <input
+                                                    class="stg-input"
+                                                    type="text"
+                                                    style="width: 100%;"
+                                                    placeholder="Search plugins..."
+                                                    bind:value={pluginSearchQuery}
+                                                />
                                             </div>
+                                            {#if filteredMarketplacePlugins.length === 0}
+                                                <div class="ai-usage-empty">
+                                                    <p>No plugins found</p>
+                                                </div>
+                                            {:else}
+                                                <div class="agent-plugin-list">
+                                                    {#each filteredMarketplacePlugins as plugin}
+                                                        <div
+                                                            class="agent-plugin-card"
+                                                        >
+                                                            <div
+                                                                class="agent-plugin-info"
+                                                            >
+                                                                <span
+                                                                    class="agent-plugin-name"
+                                                                    >{plugin.name}</span
+                                                                >
+                                                                <span
+                                                                    class="agent-plugin-desc"
+                                                                    >{plugin.description}</span
+                                                                >
+                                                                {#if plugin.installs != null}
+                                                                    <span
+                                                                        class="agent-plugin-meta"
+                                                                        >{plugin.installs.toLocaleString()}
+                                                                        installs</span
+                                                                    >
+                                                                {/if}
+                                                            </div>
+                                                            <div
+                                                                class="agent-plugin-actions"
+                                                            >
+                                                                {#if plugin.installed}
+                                                                    <span
+                                                                        class="ai-status-badge"
+                                                                    >
+                                                                        <span
+                                                                            class="ai-status-dot"
+                                                                        ></span>
+                                                                        Installed
+                                                                    </span>
+                                                                {:else}
+                                                                    <button
+                                                                        class="ai-action-btn primary sm"
+                                                                        onclick={() =>
+                                                                            handleInstallPlugin(
+                                                                                plugin.name,
+                                                                                plugin.marketplace,
+                                                                            )}
+                                                                    >
+                                                                        Install
+                                                                    </button>
+                                                                {/if}
+                                                            </div>
+                                                        </div>
+                                                    {/each}
+                                                </div>
+                                            {/if}
                                         {/if}
                                     {/if}
                                 </div>
@@ -5954,4 +6092,28 @@
     .byok-btn-link:hover {
         text-decoration: underline;
     }
+
+    /* Agent Skills Marketplace */
+    .skill-marketplace { padding: 1rem; }
+    .skill-tabs { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 1px solid var(--b1); }
+    .skill-tab { padding: .5rem 1rem; background: none; border: none; color: var(--t3); cursor: pointer; border-bottom: 2px solid transparent; }
+    .skill-tab.active { color: var(--t1); border-bottom-color: var(--acc); }
+    .skill-filters { margin-bottom: 1rem; }
+    .skill-category-select { width: 100%; padding: .5rem; background: var(--surface-hover); border: 1px solid var(--b1); border-radius: 6px; color: var(--t1); }
+    .skill-grid { display: grid; gap: .5rem; max-height: 400px; overflow-y: auto; }
+    .skill-card { background: var(--surface-hover); border: 1px solid var(--b1); border-radius: 8px; padding: .75rem; }
+    .skill-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: .5rem; }
+    .skill-card-header strong { font-size: .85rem; }
+    .skill-category-badge { font-size: .7rem; background: rgba(35, 134, 54, 0.2); color: var(--acc); padding: 2px 8px; border-radius: 4px; }
+    .skill-card-actions { display: flex; justify-content: flex-end; }
+    .installed-skills-list { max-height: 400px; overflow-y: auto; }
+    .installed-skill-item { display: flex; align-items: center; justify-content: space-between; padding: .5rem .75rem; border-bottom: 1px solid var(--b1); }
+    .installed-skill-item:last-child { border-bottom: none; }
+    .skill-name { font-size: .85rem; }
+    .skill-size { font-size: .75rem; color: var(--t3); }
+    .btn-small { padding: .3rem .75rem; font-size: .8rem; border-radius: 4px; border: 1px solid var(--b1); cursor: pointer; background: transparent; color: var(--t2); }
+    .btn-primary { background: #238636; color: #fff; border-color: #238636; }
+    .btn-danger { background: #da3633; color: #fff; border-color: #da3633; }
+    .btn-installed { background: var(--b1); color: var(--t3); cursor: default; }
+    .empty-state { text-align: center; color: var(--t3); padding: 2rem; }
 </style>
