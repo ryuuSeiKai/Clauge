@@ -603,3 +603,62 @@ pub fn cloud_get_active_token(
     state.active_token_and_provider()
 }
 
+use std::fs;
+use std::path::PathBuf;
+
+fn skills_dir() -> Option<PathBuf> {
+    dirs::home_dir().map(|h| h.join(".antigravity").join("skills"))
+}
+
+#[derive(serde::Serialize)]
+pub struct InstalledSkill {
+    pub name: String,
+    pub path: String,
+    pub size: u64,
+}
+
+#[tauri::command]
+pub fn cloud_install_skill(name: String, content: String) -> Result<(), String> {
+    let dir = skills_dir().ok_or("Cannot determine home directory")?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create skills dir: {}", e))?;
+    let path = dir.join(format!("{}.md", name));
+    fs::write(&path, &content).map_err(|e| format!("write skill: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cloud_uninstall_skill(name: String) -> Result<(), String> {
+    let dir = skills_dir().ok_or("Cannot determine home directory")?;
+    let path = dir.join(format!("{}.md", name));
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| format!("remove skill: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cloud_list_installed_skills() -> Result<Vec<InstalledSkill>, String> {
+    let dir = match skills_dir() {
+        Some(d) => d,
+        None => return Ok(Vec::new()),
+    };
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let mut skills = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+            let size = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            skills.push(InstalledSkill {
+                name,
+                path: path.to_string_lossy().to_string(),
+                size,
+            });
+        }
+    }
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(skills)
+}
+
