@@ -280,6 +280,10 @@
     <!-- Folder + cloud — "files / storage" -->
     <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
   </SidebarButton>
+  <SidebarButton label="Editor" tip="Editor" active={$mode === 'editor'} dotColor="var(--editor, #58a6ff)" id="sbi-editor" onclick={() => setMode('editor')}>
+    <!-- Code icon -->
+    <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+  </SidebarButton>
 
   <div class="sb-sep"></div>
 
