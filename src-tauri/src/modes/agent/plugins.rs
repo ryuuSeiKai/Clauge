@@ -51,7 +51,7 @@ pub fn agent_get_marketplace_plugins(
         // Codex marketplace browsing isn't wired yet — plugins ship as
         // git-repo marketplaces with TOML manifests, deferred.
         "codex" => Ok(Vec::new()),
-        "antigravity" => antigravity_style::list_marketplace(),
+        "antigravity" => antigravity_style::list_marketplace(None),
         _ => claude_style::list_marketplace(resolved(provider.as_deref())),
     }
 }
@@ -413,9 +413,74 @@ mod antigravity_style {
         Ok(())
     }
 
-    pub fn list_marketplace() -> Result<Vec<MarketplacePlugin>, String> {
-        // No marketplace browsing available — agy has no search/browse command.
-        Ok(Vec::new())
+    pub fn list_marketplace(search: Option<&str>) -> Result<Vec<MarketplacePlugin>, String> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| format!("http client: {}", e))?;
+
+        let mut criteria = vec![
+            serde_json::json!({"filterType": 8, "value": "Microsoft.VisualStudio.Code"}),
+        ];
+        if let Some(query) = search.filter(|s| !s.is_empty()) {
+            criteria.push(serde_json::json!({"filterType": 1, "value": query}));
+        }
+
+        let body = serde_json::json!({
+            "filters": [{"criteria": criteria}],
+            "flags": 0,
+            "pageNumber": 1,
+            "pageSize": 50,
+        });
+
+        let resp = client
+            .post("https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery")
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json;api-version=7.1-preview.1")
+            .json(&body)
+            .send()
+            .map_err(|e| format!("marketplace request: {}", e))?;
+
+        let payload: serde_json::Value = resp
+            .json()
+            .map_err(|e| format!("parse marketplace response: {}", e))?;
+
+        let extensions = payload["results"][0]["extensions"]
+            .as_array()
+            .ok_or("unexpected marketplace response format")?;
+
+        let mut plugins: Vec<MarketplacePlugin> = Vec::new();
+        for ext in extensions {
+            let name = ext["extensionName"].as_str().unwrap_or("").to_string();
+            if name.is_empty() { continue; }
+            let publisher = ext["publisher"]["publisherName"].as_str().unwrap_or("").to_string();
+            let _display_name = ext["displayName"].as_str().unwrap_or(&name).to_string();
+            let description = ext["shortDescription"].as_str().unwrap_or("").to_string();
+
+            // Extract categories/tags for the `category` field.
+            let categories: Vec<&str> = ext["categories"]
+                .as_array()
+                .map(|arr| arr.iter().filter_map(|c| c.as_str()).collect())
+                .unwrap_or_default();
+            let category = categories.first().map(|s| s.to_string());
+
+            let installs = ext["statistics"]
+                .as_array()
+                .and_then(|stats| stats.iter().find(|s| s["statisticName"] == "install"))
+                .and_then(|s| s["value"].as_f64().map(|v| v as u64));
+
+            plugins.push(MarketplacePlugin {
+                name: format!("{}.{}", publisher, name),
+                description,
+                marketplace: "vscode-marketplace".to_string(),
+                category,
+                installed: false,
+                installs,
+            });
+        }
+
+        plugins.sort_by(|a, b| b.installs.unwrap_or(0).cmp(&a.installs.unwrap_or(0)));
+        Ok(plugins)
     }
 
     pub fn install(cli: &'static dyn CliRunner, name: &str, marketplace: &str) -> Result<(), String> {
