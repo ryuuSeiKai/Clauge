@@ -17,6 +17,8 @@ function loadInitialMode(): AppMode {
 
 export const mode = writable<AppMode>(loadInitialMode());
 
+export const lastModeBeforeEditor = writable<AppMode>('agent');
+
 // Persist mode changes (skip 'history' — it's a transient view, not a primary mode)
 mode.subscribe(v => {
   if ((VALID_MODES as string[]).includes(v)) {

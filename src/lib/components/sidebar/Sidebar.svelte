@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { mode, navOpen, aiPanelOpen, activeModal } from '$lib/stores/app';
+  import { mode, navOpen, aiPanelOpen, activeModal, lastModeBeforeEditor } from '$lib/stores/app';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { isMac, isLinux } from '$lib/utils/platform';
   import { cloudConnected, cloudConflicts, syncing, setSyncing, setDisconnected, showSyncRestorePrompt, markSynced } from '$lib/stores/cloud';
@@ -66,10 +66,13 @@
       navOpen.set(false);
       return;
     }
-    if (m !== 'history') previousMode = m;
+    if (m === 'editor') {
+      lastModeBeforeEditor.set($mode);
+    }
+    if (m !== 'history' && m !== 'editor') previousMode = m;
     mode.set(m);
     navOpen.set(true);
-    realignActiveTabToMode(m);
+    realignActiveTabToMode(m === 'editor' ? $lastModeBeforeEditor : m);
   }
 
   // After a mode switch, if the currently active tab belongs to a

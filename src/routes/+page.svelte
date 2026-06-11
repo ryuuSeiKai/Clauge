@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { mode } from '$lib/stores/app';
+  import { mode, lastModeBeforeEditor } from '$lib/stores/app';
   import { activeHistoryEntry } from '$lib/modes/rest/stores';
   import { tabs as sharedTabs, activeTabId } from '$lib/shared/stores/tabs';
   import AgentPanel from '$lib/modes/agent/components/AgentPanel.svelte';
@@ -12,6 +12,8 @@
   import HistoryViewer from '$lib/modes/rest/components/HistoryViewer.svelte';
   import EditorPanel from '$lib/modes/editor/components/EditorPanel.svelte';
   import SettingsModal from '$lib/components/settings/SettingsModal.svelte';
+
+  const effectiveMode = $derived($mode === 'editor' ? $lastModeBeforeEditor : $mode);
 
   // Settings is the only cross-mode "tab" — visibility is driven by the
   // active topbar tab, not $mode (which stays tied to the user's real
@@ -49,11 +51,11 @@
   making text + icons illegible.
 -->
 <div class="workspace" class:has-editor={$mode === 'editor'}>
-  <div class="panel" class:active={$mode === 'agent' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'agent' && !settingsActive}>
     <AgentPanel />
   </div>
 
-  <div class="panel" class:active={$mode === 'history' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'history' && !settingsActive}>
     {#if $activeHistoryEntry}
       <HistoryViewer />
     {:else}
@@ -64,27 +66,27 @@
     {/if}
   </div>
 
-  <div class="panel" class:active={$mode === 'rest' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'rest' && !settingsActive}>
     <RestPanel />
   </div>
 
-  <div class="panel" class:active={$mode === 'sql' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'sql' && !settingsActive}>
     <SqlPanel />
   </div>
 
-  <div class="panel" class:active={$mode === 'nosql' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'nosql' && !settingsActive}>
     <NoSqlPanel />
   </div>
 
-  <div class="panel" class:active={$mode === 'ssh' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'ssh' && !settingsActive}>
     <SshPanel />
   </div>
 
-  <div class="panel" class:active={$mode === 'explorer' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'explorer' && !settingsActive}>
     <ExplorerPanel />
   </div>
 
-  <div class="panel" class:active={$mode === 'workspace' && !settingsActive}>
+  <div class="panel" class:active={effectiveMode === 'workspace' && !settingsActive}>
     <WorkspacePanel />
   </div>
 
@@ -140,8 +142,6 @@
   .workspace.has-editor .panel:not(.editor-panel) {
     position: relative;
     flex: 1;
-    visibility: visible;
-    pointer-events: auto;
   }
   .workspace.has-editor .panel.editor-panel {
     position: relative;

@@ -105,7 +105,7 @@
     } from "$lib/commands/cloud";
     import { listen } from "@tauri-apps/api/event";
     import { cloudConflicts } from "$lib/stores/cloud";
-    import { activeModal, aiPanelOpen, mode, type AppMode } from "$lib/stores/app";
+    import { activeModal, aiPanelOpen, mode, lastModeBeforeEditor, type AppMode } from "$lib/stores/app";
     import {
         agentSessionKey,
         agentCodexToken,
@@ -178,7 +178,6 @@
     // (getCurrent() and onOpenUrl can both return the same startup URL).
     let lastDispatchedToken = "";
 
-    let lastModeBeforeEditor = $state<AppMode>('agent');
     let showNewSessionModal = $state(false);
     let showEditSessionModal = $state(false);
     let showUsageDashboard = $state(false);
@@ -775,9 +774,9 @@
                 e.preventDefault();
                 const m = get(mode);
                 if (m === "editor") {
-                    mode.set(lastModeBeforeEditor);
+                    mode.set(get(lastModeBeforeEditor));
                 } else {
-                    lastModeBeforeEditor = m;
+                    lastModeBeforeEditor.set(m);
                     mode.set("editor");
                 }
             }
