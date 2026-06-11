@@ -125,3 +125,36 @@ import type { ProState } from '$lib/stores/cloud';
  *  the latest known state immediately without waiting for a state-change
  *  event that may not fire on the boot path. */
 export const proStateCurrent = () => invoke<ProState>('pro_state_current');
+
+export interface InstalledSkill {
+  name: string;
+  path: string;
+  size: number;
+}
+
+export const cloudInstallSkill = (name: string, content: string) =>
+  invoke<void>('cloud_install_skill', { name, content });
+
+export const cloudUninstallSkill = (name: string) =>
+  invoke<void>('cloud_uninstall_skill', { name });
+
+export const cloudListInstalledSkills = () =>
+  invoke<InstalledSkill[]>('cloud_list_installed_skills');
+
+export const cloudFetchMarketplaceSkills = async () => {
+  const base = await getApiBaseUrl();
+  return fetch(`${base}/api/marketplace/skills`).then(r => r.json());
+};
+
+export const cloudFetchSkillContent = async (url: string) => {
+  const base = await getApiBaseUrl();
+  return fetch(`${base}/api/marketplace/skill?url=${encodeURIComponent(url)}`).then(r => r.text());
+};
+
+async function getApiBaseUrl(): Promise<string> {
+  try {
+    return await cloudGetApiUrl();
+  } catch {
+    return 'http://67.217.243.181:3000';
+  }
+}
