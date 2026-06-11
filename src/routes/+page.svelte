@@ -10,6 +10,7 @@
   import ExplorerPanel from '$lib/modes/explorer/components/ExplorerPanel.svelte';
   import WorkspacePanel from '$lib/modes/workspace/components/WorkspacePanel.svelte';
   import HistoryViewer from '$lib/modes/rest/components/HistoryViewer.svelte';
+  import EditorPanel from '$lib/modes/editor/components/EditorPanel.svelte';
   import SettingsModal from '$lib/components/settings/SettingsModal.svelte';
 
   // Settings is the only cross-mode "tab" — visibility is driven by the
@@ -47,7 +48,7 @@
   rgba, so the underlying mode panel was bleeding through Settings,
   making text + icons illegible.
 -->
-<div class="workspace">
+<div class="workspace" class:has-editor={$mode === 'editor'}>
   <div class="panel" class:active={$mode === 'agent' && !settingsActive}>
     <AgentPanel />
   </div>
@@ -85,6 +86,10 @@
 
   <div class="panel" class:active={$mode === 'workspace' && !settingsActive}>
     <WorkspacePanel />
+  </div>
+
+  <div class="panel editor-panel" class:active={$mode === 'editor' && !settingsActive}>
+    <EditorPanel />
   </div>
 
   <!-- Settings overlay panel — sits above all mode panels when its tab
@@ -126,6 +131,25 @@
      so this only fires when settings is genuinely the active tab. */
   .panel.panel-settings.active {
     z-index: 2;
+  }
+  /* Editor split — when active, .workspace becomes flex row */
+  .workspace.has-editor {
+    display: flex;
+    flex-direction: row;
+  }
+  .workspace.has-editor .panel:not(.editor-panel) {
+    position: relative;
+    flex: 1;
+    visibility: visible;
+    pointer-events: auto;
+  }
+  .workspace.has-editor .panel.editor-panel {
+    position: relative;
+    width: min(50%, 800px);
+    min-width: 400px;
+    visibility: visible;
+    pointer-events: auto;
+    border-left: 1px solid #30363d;
   }
   .history-empty {
     flex: 1;

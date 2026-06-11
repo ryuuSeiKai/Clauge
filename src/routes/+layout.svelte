@@ -105,7 +105,7 @@
     } from "$lib/commands/cloud";
     import { listen } from "@tauri-apps/api/event";
     import { cloudConflicts } from "$lib/stores/cloud";
-    import { activeModal, aiPanelOpen, mode } from "$lib/stores/app";
+    import { activeModal, aiPanelOpen, mode, type AppMode } from "$lib/stores/app";
     import {
         agentSessionKey,
         agentCodexToken,
@@ -178,6 +178,7 @@
     // (getCurrent() and onOpenUrl can both return the same startup URL).
     let lastDispatchedToken = "";
 
+    let lastModeBeforeEditor = $state<AppMode>('agent');
     let showNewSessionModal = $state(false);
     let showEditSessionModal = $state(false);
     let showUsageDashboard = $state(false);
@@ -766,6 +767,21 @@
                     e.preventDefault();
             });
         }
+
+        // Editor split panel keyboard shortcut: Cmd+Shift+E / Ctrl+Shift+E
+        // Toggles the editor on/off. When closing, restores the previous mode.
+        window.addEventListener("keydown", (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "e") {
+                e.preventDefault();
+                const m = get(mode);
+                if (m === "editor") {
+                    mode.set(lastModeBeforeEditor);
+                } else {
+                    lastModeBeforeEditor = m;
+                    mode.set("editor");
+                }
+            }
+        });
 
         // Window focus/blur for custom traffic light dimming
         window.addEventListener("blur", () =>
