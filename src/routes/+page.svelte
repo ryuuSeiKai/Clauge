@@ -139,10 +139,12 @@
     display: flex;
     flex-direction: row;
   }
-  .workspace.has-editor .panel:not(.editor-panel) {
+
+  .workspace.has-editor .panel.active:not(.editor-panel) {
     position: relative;
     flex: 1;
   }
+
   .workspace.has-editor .panel.editor-panel {
     position: relative;
     width: min(50%, 800px);

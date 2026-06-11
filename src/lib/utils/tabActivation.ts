@@ -10,9 +10,16 @@ import { tabs, activateTab } from '$lib/shared/stores/tabs';
 export async function activateTabAcrossMode(tabId: number) {
   const tab = get(tabs).find((t) => t.id === tabId);
   if (!tab) return;
-  // Settings is cross-mode — keep $mode pointing at the user's actual
-  // mode so the "+" button + AI panel + sidebar highlight stay correct.
-  if (tab.mode !== 'settings') mode.set(tab.mode as any);
+
+  if (tab.mode !== 'settings') {
+    if (get(mode) === 'editor') {
+      const { lastModeBeforeEditor } = await import('$lib/stores/app');
+      lastModeBeforeEditor.set(tab.mode as any);
+    } else {
+      mode.set(tab.mode as any);
+    }
+  }
+
   activateTab(tabId);
   if (tab.mode === 'rest') {
     const { loadRequest, clearActiveRequest } = await import('$lib/modes/rest/stores');
